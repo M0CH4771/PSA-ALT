@@ -99,6 +99,7 @@
     if (index>=queue.length) { finishBatch('一括処理が完了しました。'); return; }
     activeIndex=index; setItem(index,'PSA公式を確認中…','running','');
     google.script.run.withSuccessHandler(request=>{
+      batchNonce=request.nonce;
       if (!popup || popup.closed) { setItem(index,'保留','hold','PSA確認ウィンドウが閉じられました。'); return processNext(index+1); }
       popup.location.href=request.psaUrl;
       armTimeout(index,'PSAから応答がありません。PSA用TampermonkeyスクリプトとPSAページの表示を確認してください。');
