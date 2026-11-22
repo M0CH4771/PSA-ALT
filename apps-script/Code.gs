@@ -33,7 +33,7 @@ function ensureSummarySheet(dateInput) {
   if (!sheet) {
     sheet = ss.insertSheet(name);
     sheet.getRange(1, 1, 1, 11).setValues([[
-      '証明番号', 'カード名', 'カード画像', '採用価格 USD', 'ALTリンク', '前回成約 USD', '', '採用価格 USD', '', '', '最新成約 USD'
+      '証明番号', 'カード名', 'カード画像', '価格 USD', 'ALTリンク', '前回成約 USD', '', '採用価格 USD', '', '', '最新成約 USD'
     ]]);
     sheet.setFrozenRows(1);
   }
