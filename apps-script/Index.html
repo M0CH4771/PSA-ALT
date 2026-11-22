@@ -76,7 +76,7 @@
       <label for="altData">ALT成約スクレイパーの出力</label>
       <textarea id="altData" placeholder="#ALT_META    ALTカード名    PSA 10    https://alt.xyz/itm/.../research&#10;2026-11-21    40.00    eBay    https://www.ebay.com/itm/..."></textarea>
       <button class="secondary" onclick="pasteClipboard()">クリップボードから貼り付け</button>
-      <label class="check"><input id="matchConfirmed" type="checkbox"><span>PSA公式ページとALTページのカード名・言語・版が一致し、ALTの表示グレードも同じだと確認しました。</span></label>
+      <label class="check"><input id="matchConfirmed" type="checkbox"><span>ALTが今回の鑑定番号から検索された候補で、表示されたカード情報がPSA公式情報と一致することを確認しました。</span></label>
       <button id="saveButton" onclick="saveCard()">採用価格を計算して日付まとめへ記入</button>
       <div id="status"></div>
     </section>
@@ -117,7 +117,13 @@
     try {
       const text=await navigator.clipboard.readText(); $('altData').value=text;
       const meta=text.split(/\r?\n/).find(line=>line.startsWith('#ALT_META\t'));
-      if(meta) $('altUrl').value=meta.split('\t')[3]||'';
+      if(meta) {
+        const parts=meta.split('\t');
+        $('altUrl').value=parts[3]||'';
+        const searchedCert=String(parts[4]||'').replace(/\D/g,'');
+        const grade=String(parts[2]||'').trim();
+        $('matchConfirmed').checked=!!currentPsa && searchedCert===currentPsa.cert && grade===currentPsa.grade;
+      }
       showMessage('status','クリップボードから貼り付けました。','success');
     }
     catch (_) { $('altData').focus(); showMessage('status','貼り付け欄を選択して、Ctrl+V（Macは⌘V）を押してください。'); }
