@@ -54,10 +54,12 @@
   $('targetDate').value = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
   function say(text, type='') { const el=$('status'); el.textContent=text; el.className=type||'small'; }
   function init() {
-    google.script.run.withSuccessHandler(state => {
-      if (!state.configured) { $('setup').style.display='block'; return; }
-      $('setup').style.display='none'; $('workflow').hidden=false; $('cert').focus();
-    }).withFailureHandler(err => { $('setup').style.display='block'; $('setupStatus').textContent=err.message||String(err); }).getAppState();
+    // Do not wait for a server call before showing the form. The bound-sheet
+    // authorization is checked when the user starts a batch, with errors shown in the app.
+    $('setup').style.display='none';
+    $('workflow').hidden=false;
+    $('cert').focus();
+    say('準備完了です。日付を選んでバーコードを読み取ってください。');
   }
   function addCert() {
     if (busy) return;
