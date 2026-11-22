@@ -247,8 +247,8 @@
       .lookupPsaCert(queue[index].cert);
   }
 
-  function handlePsaResult(event, data) {
-    if (event.origin !== 'https://www.psacard.com') return;
+  function handlePsaResult(event, data, bridged) {
+    if (!bridged && event.origin !== 'https://www.psacard.com') return;
     if (activeStage !== 'psa-page') return;
     var index = activeIndex;
     var cert = queue[index].cert;
@@ -288,8 +288,8 @@
     armStageTimeout(index, 'alt-page', 'ALTから返事がありません。ALT用Tampermonkeyスクリプトや検索ページを確認してください。');
   }
 
-  function handleAltResult(event, data) {
-    if (event.origin !== 'https://alt.xyz') return;
+  function handleAltResult(event, data, bridged) {
+    if (!bridged && event.origin !== 'https://alt.xyz') return;
     if (activeStage !== 'alt-page') return;
     var index = activeIndex;
     var psa = queue[index].psa;
@@ -353,13 +353,15 @@
 
   function onMessage(event) {
     var data = event.data;
-    if (!busy || !popupWindow || event.source !== popupWindow || !data) return;
+    var fromPopup = !!popupWindow && event.source === popupWindow;
+    var fromTampermonkeyBridge = event.source === window && event.origin === window.location.origin;
+    if (!busy || !popupWindow || (!fromPopup && !fromTampermonkeyBridge) || !data) return;
     if (String(data.nonce || '') !== activeNonce || activeIndex < 0) return;
 
     if (data.type === 'PSA_CERT_RESULT') {
-      handlePsaResult(event, data);
+      handlePsaResult(event, data, fromTampermonkeyBridge);
     } else if (data.type === 'PSA_ALT_BATCH_RESULT') {
-      handleAltResult(event, data);
+      handleAltResult(event, data, fromTampermonkeyBridge);
     }
   }
 
