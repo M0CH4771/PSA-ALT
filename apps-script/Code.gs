@@ -18,13 +18,16 @@ function getAppState() {
   };
 }
 
-function saveTargetSpreadsheetId(id) {
-  id = String(id || '').trim();
-  if (!/^[A-Za-z0-9_-]{20,}$/.test(id)) throw new Error('スプレッドシートIDを確認してください。');
-  const ss = SpreadsheetApp.openById(id); // Check access before saving.
+/**
+ * Run once from the Apps Script editor opened via this spreadsheet's
+ * Extensions > Apps Script menu. This binds the web app to its container
+ * spreadsheet without asking the user to copy or enter a spreadsheet ID.
+ */
+function initializeBoundSpreadsheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) throw new Error('対象スプレッドシートから「拡張機能 → Apps Script」を開いて実行してください。');
   const summaryTabs = ss.getSheets().filter(s => /\d{1,2}\/\d{1,2}\s*まとめ/.test(s.getName()));
-  if (!summaryTabs.length) throw new Error('「11/20 まとめ」のような日付まとめシートが見つかりません。');
-  PropertiesService.getScriptProperties().setProperty(PSA_ALT_PROPERTIES.targetSpreadsheetId, id);
+  PropertiesService.getScriptProperties().setProperty(PSA_ALT_PROPERTIES.targetSpreadsheetId, ss.getId());
   return { saved: true, sheets: summaryTabs.map(s => s.getName()) };
 }
 
