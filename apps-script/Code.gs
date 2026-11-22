@@ -54,17 +54,12 @@ function initializeBoundSpreadsheet() {
   return { saved: true, sheets: summaryTabs.map(s => s.getName()) };
 }
 
-function lookupPsaCert(certInput) {
+function lookupPsaCert(certInput, nonce) {
   const cert = normalizeCert_(certInput);
-  const psa = fetchPsaCert_(cert);
-  return {
-    cert,
-    name: psa.name,
-    grade: psa.grade,
-    imageUrl: psa.imageUrl,
-    psaUrl: psa.url,
-    altSearchUrl: `https://alt.xyz/browse?query=${encodeURIComponent(cert)}&psaGrade=${encodeURIComponent(psa.grade.replace(/^PSA\s*/i, ''))}`
-  };
+  const token = String(nonce || '');
+  if (!/^[\w-]{10,100}$/.test(token)) throw new Error('調査セッションが無効です。最初からやり直してください。');
+  const url = `https://www.psacard.com/cert/${encodeURIComponent(cert)}/psa?psaBatch=1&psaCert=${encodeURIComponent(cert)}&psaNonce=${encodeURIComponent(token)}`;
+  return { cert, nonce: token, psaUrl: url };
 }
 
 function writePricedCard(payload) {
@@ -76,9 +71,17 @@ function writePricedCard(payload) {
   }
 
   const cert = normalizeCert_(payload.cert);
-  const psa = fetchPsaCert_(cert); // Re-fetch official record; do not trust client-supplied card data.
+  const psa = payload.psa || {};
+  psa.grade = String(psa.grade || '').trim();
+  psa.name = String(psa.name || '').trim();
+  psa.imageUrl = String(psa.imageUrl || '').trim();
+  psa.url = String(psa.url || '').trim();
+  if (!/^PSA \d+(?:\.5)?$/.test(psa.grade) || !psa.name || !isPsaCertUrl_(psa.url, cert)) {
+    throw new Error('PSA公式ページからの鑑定情報を確認できません。番号を保留しました。');
+  }
+  if (psa.imageUrl && !/^https:\/\/www\.psacard\.com\//i.test(psa.imageUrl)) psa.imageUrl = '';
   const alt = parseAltPaste_(payload.altData);
-  if (alt.cert !== cert) throw new Error('ALTを今回のPSA鑑定番号から検索した記録ではありません。Webアプリの「ALTを自動検索」からやり直してください。');
+  if (alt.cert !== cert) throw new Error('ALTを今回のPSA鑑定番号から検索した記録ではありません。一括処理からやり直してください。');
   if (alt.grade !== psa.grade) throw new Error(`グレード不一致です。PSA公式=${psa.grade} / ALT=${alt.grade}`);
   if (!isAltResearchUrl_(alt.url)) throw new Error('ALTの「/research」ページURLを確認してください。');
   if (alt.sales.length < 2) throw new Error('有効な成約を2件確認できません。価格は記入しません。');
@@ -136,29 +139,6 @@ function writePricedCard(payload) {
   sheet.getRange(row, cols.adopted).setNote(evidence);
 
   return { ok: true, row, sheet: sheet.getName(), cert, grade: psa.grade, name: psa.name, previous: previous.price, latest: latest.price, adopted: adopted.price };
-}
-
-function fetchPsaCert_(cert) {
-  const url = `https://www.psacard.com/cert/${encodeURIComponent(cert)}/psa`;
-  const response = UrlFetchApp.fetch(url, { followRedirects: true, muteHttpExceptions: true });
-  const status = response.getResponseCode();
-  if (status < 200 || status >= 300) throw new Error(`PSAページ取得エラー（HTTP ${status}）。証明番号を手動で確認してください。`);
-  const html = response.getContentText();
-  const plain = decodeHtml_(html
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' '));
-  if (!plain.includes(cert)) throw new Error('PSAページで証明番号を照合できませんでした。');
-
-  const h1 = html.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i);
-  const name = h1 ? decodeHtml_(h1[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')).trim() : '';
-  if (!name) throw new Error('PSAページからカード名を読み取れませんでした。');
-  const gradeMatch = plain.match(/ITEM\s+GRADE\s+(GEM\s*MT|MINT|NM-MT|EX-MT|EX|VG-EX|VG|GOOD|FAIR|POOR)\s*(\d+(?:\.5)?)/i);
-  if (!gradeMatch) throw new Error('PSAページからグレードを読み取れませんでした。');
-  const grade = `PSA ${Number(gradeMatch[2])}`;
-  const imgTag = (html.match(/<img\b[^>]*\balt=["']Cert image 1["'][^>]*>/i) || [])[0] || '';
-  const src = imgTag.match(/\bsrc=["']([^"']+)["']/i);
-  return { cert, name, grade, imageUrl: src ? decodeHtml_(src[1]) : '', url: `https://www.psacard.com/cert/${encodeURIComponent(cert)}/psa` };
 }
 
 function parseAltPaste_(text) {
@@ -225,6 +205,14 @@ function isAltResearchUrl_(value) {
   try {
     const u = new URL(value);
     return u.protocol === 'https:' && u.hostname === 'alt.xyz' && /\/itm\/[0-9a-f-]+\/research\/?$/i.test(u.pathname);
+  } catch (_) { return false; }
+}
+
+function isPsaCertUrl_(value, cert) {
+  try {
+    const u = new URL(value);
+    return u.protocol === 'https:' && u.hostname === 'www.psacard.com' &&
+      new RegExp(`^/cert/${cert}/psa/?$`, 'i').test(u.pathname);
   } catch (_) { return false; }
 }
 
