@@ -170,7 +170,7 @@
     }
     if(rows.length<2) { say(`同一条件の有効成約が${rows.length}件です。2件そろわないため、価格は採用しません。`); return; }
     b.dataset.payload=[
-      ['#ALT_META',ctx.altTitle||document.querySelector('h1')?.innerText||document.title,ctx.grade,location.href].join('\t'),
+      ['#ALT_META',ctx.altTitle||document.querySelector('h1')?.innerText||document.title,ctx.grade,location.href,ctx.cert].join('\t'),
       ...rows.slice(0,2).map(x=>[x.date,x.price.toFixed(2),x.site,x.href].join('\t'))
     ].join('\n');
     b.textContent='条件を確認して2件コピー';
@@ -200,7 +200,7 @@
       for(let i=0;rows.length<2&&i<5;i++) { const more=[...root.querySelectorAll('button')].find(x=>(x.innerText||'').trim().toLowerCase()==='show more'&&!x.disabled); if(!more) break; more.click(); await sleep(700); rows=parseRows(root); }
       if(rows.length<2) throw new Error(`有効成約が${rows.length}件しかありません。2件未満は価格を決められません。`);
       const title=document.querySelector('h1')?.innerText||document.title||'';
-      const payload=[['#ALT_META',title,grade,location.href].join('\t'),...rows.slice(0,2).map(x=>[x.date,x.price.toFixed(2),x.site,x.href].join('\t'))].join('\n');
+      const payload=[['#ALT_META',title,grade,location.href,ctx?.cert||''].join('\t'),...rows.slice(0,2).map(x=>[x.date,x.price.toFixed(2),x.site,x.href].join('\t'))].join('\n');
       await copy(payload); say(`コピーしました (${grade})\n${rows[0].date} $${rows[0].price} / ${rows[0].method}\n${rows[1].date} $${rows[1].price} / ${rows[1].method}`);
       if(ctx) sessionStorage.removeItem(STORAGE_KEY);
     } catch(e) { say(e.message||String(e)); }
