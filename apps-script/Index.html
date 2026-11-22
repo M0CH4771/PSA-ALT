@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <style>
+    :root { color-scheme: light; --ink:#13233a; --muted:#61718a; --line:#dbe3ed; --blue:#2654c7; --bg:#f3f6fb; --green:#16794a; --red:#b42318; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; }
+    header { background:#10253e; color:#fff; padding:22px max(20px,calc((100vw - 960px)/2)); }
+    header h1 { font-size:22px; margin:0; }
+    header p { color:#d3deeb; margin:5px 0 0; font-size:14px; }
+    main { max-width:960px; margin:22px auto; padding:0 18px 40px; }
+    .card { background:#fff; border:1px solid var(--line); border-radius:14px; padding:20px; margin:16px 0; box-shadow:0 3px 12px #1b36520a; }
+    h2 { font-size:18px; margin:0 0 14px; }
+    label { display:block; font-size:14px; font-weight:650; margin:12px 0 6px; }
+    input,select,textarea { width:100%; border:1px solid #aebdce; border-radius:8px; background:white; padding:11px 12px; font:inherit; color:var(--ink); }
+    input:focus,select:focus,textarea:focus { outline:3px solid #c9d8ff; border-color:var(--blue); }
+    textarea { min-height:145px; font:13px/1.45 ui-monospace,SFMono-Regular,monospace; }
+    button,.button { border:0; border-radius:8px; background:var(--blue); color:white; padding:11px 16px; font:inherit; font-weight:700; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; justify-content:center; }
+    button.secondary,.button.secondary { background:#eaf0fb; color:#193c85; }
+    button:disabled { opacity:.55; cursor:wait; }
+    .row { display:grid; grid-template-columns:1fr auto; gap:10px; align-items:end; }
+    .two { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+    .small { font-size:13px; color:var(--muted); margin:7px 0; }
+    .error { color:var(--red); font-weight:600; white-space:pre-wrap; }
+    .success { color:var(--green); font-weight:700; white-space:pre-wrap; }
+    .identity { display:grid; grid-template-columns:minmax(0,1fr) 120px; gap:16px; align-items:start; }
+    .identity img { width:100%; border:1px solid var(--line); border-radius:8px; }
+    .grade { display:inline-block; border-radius:999px; padding:4px 10px; background:#e6efff; color:#1645a8; font-weight:750; }
+    .check { display:flex; gap:10px; align-items:flex-start; font-size:14px; margin:14px 0; }
+    .check input { width:19px; height:19px; margin:2px 0 0; flex:none; }
+    #status { min-height:24px; margin-top:12px; }
+    #setup { display:none; }
+    .actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:15px; }
+    @media(max-width:620px) { .two,.identity { grid-template-columns:1fr; } .identity img { width:100px; } .row { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>PSA バーコード価格調査</h1>
+    <p>バーコード読取 → PSA公式照合 → ALT成約確認 → 日付まとめへ記録</p>
+  </header>
+  <main>
+    <section class="card" id="setup">
+      <h2>初回設定</h2>
+      <p class="small">このWebアプリは、このスプレッドシート専用です。対象シートを開き、「拡張機能 → Apps Script」で関数 <code>initializeBoundSpreadsheet</code> を1回実行してから、Webアプリを再読み込みしてください。シートIDの入力は不要です。</p>
+      <div id="setupStatus" class="error">初回の紐づけが必要です。</div>
+    </section>
+
+    <section class="card" id="workflow" hidden>
+      <h2>1. 読み取り先を選択してPSAバーコードをスキャン</h2>
+      <label for="targetSheet">記入する日付まとめ</label>
+      <select id="targetSheet"></select>
+      <label for="cert">PSA証明番号</label>
+      <div class="row"><input id="cert" inputmode="numeric" autocomplete="off" placeholder="スキャナーで読み取ると自動照合します"><button id="lookupButton" onclick="lookup()">PSA照合</button></div>
+      <p class="small">USBバーコードスキャナーは入力欄を選んで読み取ってください。末尾Enterで照合します。</p>
+    </section>
+
+    <section class="card" id="psaCard" hidden>
+      <h2>2. PSA公式のカード情報を確認</h2>
+      <div class="identity">
+        <div><div id="psaGrade" class="grade"></div><p id="psaName"></p><a id="psaLink" target="_blank" rel="noopener">PSA公式ページを開く</a></div>
+        <img id="psaImage" alt="PSA公式カード画像" hidden>
+      </div>
+      <p class="small">カード名・セット・型番・言語・版が現物と一致することを確認してください。</p>
+    </section>
+
+    <section class="card" id="altCard" hidden>
+      <h2>3. ALTのSales Historyを読み取る</h2>
+      <p class="small">PSA鑑定番号でALTを検索します。Tampermonkeyが候補ページを開き、PSAグレードと成約履歴を合わせます。結果を確認してからコピーしてください。</p>
+      <div class="two">
+        <div><label for="altUrl">ALTカードのResearch URL</label><input id="altUrl" placeholder="自動検索後に貼り付けられます"></div>
+        <div><label>&nbsp;</label><a id="altAutoSearch" class="button secondary" href="https://alt.xyz/browse" target="_blank" rel="noopener">ALTを自動検索</a></div>
+      </div>
+      <label for="altData">ALT成約スクレイパーの出力</label>
+      <textarea id="altData" placeholder="#ALT_META    ALTカード名    PSA 10    https://alt.xyz/itm/.../research&#10;2026-11-21    40.00    eBay    https://www.ebay.com/itm/..."></textarea>
+      <button class="secondary" onclick="pasteClipboard()">クリップボードから貼り付け</button>
+      <label class="check"><input id="matchConfirmed" type="checkbox"><span>PSA公式ページとALTページのカード名・言語・版が一致し、ALTの表示グレードも同じだと確認しました。</span></label>
+      <button id="saveButton" onclick="saveCard()">採用価格を計算して日付まとめへ記入</button>
+      <div id="status"></div>
+    </section>
+  </main>
+<script>
+  let currentPsa = null;
+  const $ = id => document.getElementById(id);
+  function showMessage(id, text, type='') { const el=$(id); el.textContent=text; el.className=type; }
+  function init() {
+    google.script.run.withSuccessHandler(state => {
+      if (!state.configured) { $('setup').style.display='block'; return; }
+      $('setup').style.display='none';
+      $('workflow').hidden=false;
+      populateSheets(state.sheets);
+      $('cert').focus();
+    }).withFailureHandler(err => showMessage('setupStatus', err.message || String(err), 'error')).getAppState();
+  }
+  function populateSheets(sheets) {
+    const select=$('targetSheet'); select.innerHTML='';
+    (sheets||[]).forEach(name => { const o=document.createElement('option'); o.value=name; o.textContent=name; select.appendChild(o); });
+    if (!sheets || !sheets.length) showMessage('setupStatus','「11/20 まとめ」のような日付まとめシートがありません。','error');
+  }
+  function lookup() {
+    const cert=$('cert').value.trim();
+    if (!cert) return;
+    $('lookupButton').disabled=true;
+    showMessage('status','PSA公式ページを確認しています…');
+    google.script.run.withSuccessHandler(data => {
+      currentPsa=data;
+      $('psaGrade').textContent=data.grade; $('psaName').textContent=data.name; $('psaLink').href=data.psaUrl;
+      $('psaImage').hidden=!data.imageUrl; if(data.imageUrl) $('psaImage').src=data.imageUrl;
+      $('altAutoSearch').href=data.altSearchUrl;
+      $('psaCard').hidden=false; $('altCard').hidden=false; $('altUrl').value=''; $('altData').value=''; $('matchConfirmed').checked=false;
+      $('lookupButton').disabled=false; showMessage('status','PSA公式照合できました。次にALTの成約を読み取ってください。','success');
+    }).withFailureHandler(err => { $('lookupButton').disabled=false; showMessage('status',err.message || String(err),'error'); }).lookupPsaCert(cert);
+  }
+  async function pasteClipboard() {
+    try {
+      const text=await navigator.clipboard.readText(); $('altData').value=text;
+      const meta=text.split(/\r?\n/).find(line=>line.startsWith('#ALT_META\t'));
+      if(meta) $('altUrl').value=meta.split('\t')[3]||'';
+      showMessage('status','クリップボードから貼り付けました。','success');
+    }
+    catch (_) { $('altData').focus(); showMessage('status','貼り付け欄を選択して、Ctrl+V（Macは⌘V）を押してください。'); }
+  }
+  function saveCard() {
+    if (!currentPsa) return;
+    const payload={ cert:currentPsa.cert, targetSheet:$('targetSheet').value, altUrl:$('altUrl').value.trim(), altData:$('altData').value, matchConfirmed:$('matchConfirmed').checked };
+    $('saveButton').disabled=true; showMessage('status','条件を確認してまとめシートに記入しています…');
+    google.script.run.withSuccessHandler(r => {
+      $('saveButton').disabled=false;
+      showMessage('status',`記入しました: ${r.sheet} ${r.row}行目 / ${r.cert} / ${r.grade} / 採用 $${r.adopted}`,'success');
+      $('cert').value=''; $('psaCard').hidden=true; $('altCard').hidden=true; currentPsa=null; $('cert').focus();
+    }).withFailureHandler(err => { $('saveButton').disabled=false; showMessage('status',err.message || String(err),'error'); }).writePricedCard(payload);
+  }
+  $('cert').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();lookup();}});
+  init();
+</script>
+</body>
+</html>
