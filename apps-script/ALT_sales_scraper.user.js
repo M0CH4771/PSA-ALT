@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         PSA-ALT Cert Search and Sales Copier
 // @namespace    M0CH4771.PSA-ALT
-// @version      2.0.0
-// @description  Searches ALT by PSA cert, selects the exact PSA grade, opens sales history, and copies two eligible sales.
+// @version      3.0.0
+// @description  Searches ALT by PSA cert, selects the exact grade, and returns confirmed sales to the batch app.
 // @match        https://alt.xyz/browse*
 // @match        https://alt.xyz/itm/*/research*
 // @run-at       document-idle
@@ -28,6 +28,16 @@
   const norm = s => String(s||'').replace(/\s+/g,' ').trim().toLowerCase();
   const readContext = () => { try { const c=JSON.parse(sessionStorage.getItem(STORAGE_KEY)||'null'); return c&&Date.now()-c.createdAt<10*60*1000?c:null; } catch (_) { return null; } };
   const saveContext = c => sessionStorage.setItem(STORAGE_KEY,JSON.stringify(c));
+  function report(ctx, ok, reason='', sales=[]) {
+    say(ok ? `ALT成約をWebアプリへ返しました (${sales.length}件)。` : `保留: ${reason}`);
+    if (!ctx?.batch || !ctx.nonce || !window.opener) return;
+    window.opener.postMessage({
+      type:'PSA_ALT_BATCH_RESULT', nonce:ctx.nonce, cert:ctx.cert, grade:ctx.grade,
+      ok, reason, title:ctx.altTitle||document.querySelector('h1')?.innerText||document.title,
+      url:location.href,
+      sales:sales.map(x=>({date:x.date,price:x.price,site:x.site,url:x.href}))
+    }, '*');
+  }
 
   function captureSearchRequest() {
     if (!/^\/browse\/?$/.test(location.pathname)) return;
@@ -35,7 +45,9 @@
     const cert = String(params.get('query')||'').replace(/\D/g,'');
     const grade = String(params.get('psaGrade')||'').trim();
     if (!/^\d{6,12}$/.test(cert) || !/^\d+(?:\.5)?$/.test(grade)) return;
-    const ctx = { cert, grade:`PSA ${Number(grade)}`, cardName:params.get('psaName')||'', createdAt:Date.now(), route:'browse' };
+    const nonce=String(params.get('psaNonce')||'');
+    const batch=params.get('psaBatch')==='1' && /^[\w-]{10,100}$/.test(nonce);
+    const ctx = { cert, grade:`PSA ${Number(grade)}`, cardName:params.get('psaName')||'', nonce, batch, createdAt:Date.now(), route:'browse' };
     saveContext(ctx);
     say(`鑑定番号 ${cert} でALT検索中です。候補カードを確認しています…`);
   }
@@ -70,12 +82,12 @@
         return;
       }
       if(candidates.length>1) {
-        say(`ALT候補が${candidates.length}件あります。誤選択防止のため自動選択を止めました。検索結果から該当カードを選んでください。`);
+        report(ctx,false,`ALT候補が${candidates.length}件あります。誤選択を防ぐため保留しました。`);
         return;
       }
       await sleep(400);
     }
-    say('ALTの候補を取得できませんでした。検索結果を画面で確認してください。');
+    report(ctx,false,'ALTの候補を取得できませんでした。');
   }
 
   function currentGradeButton() {
@@ -116,9 +128,11 @@
       if(!text||!/(?:\/itm\/|\/sold\/|ebay\.com\/itm\/)/i.test(href)||/listing\s*price|relisted|not\s*paid|unsold|alt\s*value/i.test(text)) continue;
       const lines=text.split(/\n+/).map(x=>x.trim()).filter(Boolean);
       const method=lines.find(x=>/^(auction|buy now|best offer|fixed price|sale)$/i.test(x));
+      // Best Offer rows do not reliably expose the accepted offer amount; never use a displayed listing amount.
+      if(!method || /^best offer$/i.test(method)) continue;
       const dateText=lines.find(x=>/^(?:[A-Z][a-z]{2,8}\s+\d{1,2},?\s+\d{4}|\d{4}-\d{2}-\d{2})$/.test(x));
       const money=lines.find(x=>/^\$\s?[\d,]+(?:\.\d{1,2})?$/.test(x));
-      if(!method||!dateText||!money) continue;
+      if(!dateText||!money) continue;
       const d=new Date(dateText), price=Number(money.replace(/[$,\s]/g,''));
       if(!Number.isFinite(d.getTime())||!Number.isFinite(price)||price<=0) continue;
       const ebayId=(href.match(/ebay\.com\/itm\/(\d{9,15})/i)||[])[1];
@@ -144,31 +158,32 @@
     say(`ALTカード: ${ctx.altTitle||'鑑定番号検索結果'}\nPSA ${ctx.grade} の履歴を準備しています…`);
 
     let gradeButton=await waitFor(currentGradeButton);
-    if(!gradeButton) { say('ALTのPSAグレード欄を確認できません。'); return; }
+    if(!gradeButton) { report(ctx,false,'ALTのPSAグレード欄を確認できません。'); return; }
     if(norm(gradeButton.innerText)!==norm(ctx.grade)) {
       gradeButton.click();
       const menuItem=await waitFor(()=>[...document.querySelectorAll('[role="menuitem"]')].find(el=>norm(el.innerText)===norm(ctx.grade)));
-      if(!menuItem) { say(`${ctx.grade}の選択肢がALTにありません。別グレードは使わず、価格入力を止めてください。`); return; }
+      if(!menuItem) { report(ctx,false,`${ctx.grade}の選択肢がALTにありません。`); return; }
       menuItem.click();
       gradeButton=await waitFor(()=>{ const el=currentGradeButton(); return el&&norm(el.innerText)===norm(ctx.grade)?el:null; });
-      if(!gradeButton) { say('ALTの表示グレードが切り替わりませんでした。'); return; }
+      if(!gradeButton) { report(ctx,false,'ALTの表示グレードが切り替わりませんでした。'); return; }
     }
 
     const opened=await waitFor(()=>{
       if(transactionsRoot()) return 'already-open';
       return recentTransactionsHeading()?'ready':null;
     });
-    if(!opened) { say('ALTの成約履歴欄が見つかりません。'); return; }
-    if(opened!=='already-open' && !(await openTransactions())) { say('ALTの「Recent Transactions → VIEW ALL」を見つけられませんでした。'); return; }
+    if(!opened) { report(ctx,false,'ALTの成約履歴欄が見つかりません。'); return; }
+    if(opened!=='already-open' && !(await openTransactions())) { report(ctx,false,'ALTの「Recent Transactions → VIEW ALL」を見つけられませんでした。'); return; }
     const root=await waitFor(transactionsRoot,15000);
-    if(!root) { say('Sales Historyを開けませんでした。ALTの画面構成を確認してください。'); return; }
+    if(!root) { report(ctx,false,'Sales Historyを開けませんでした。'); return; }
     let rows=parseRows(root);
     for(let i=0;rows.length<2&&i<5;i++) {
       const more=[...root.querySelectorAll('button')].find(x=>(x.innerText||'').trim().toLowerCase()==='show more'&&!x.disabled);
       if(!more) break;
       more.click(); await sleep(700); rows=parseRows(root);
     }
-    if(rows.length<2) { say(`同一条件の有効成約が${rows.length}件です。2件そろわないため、価格は採用しません。`); return; }
+    if(rows.length<2) { report(ctx,false,`同一条件の有効成約が${rows.length}件です。2件そろわないため価格を記入しません。`); return; }
+    if(ctx.batch) { report(ctx,true,'',rows.slice(0,2)); sessionStorage.removeItem(STORAGE_KEY); b.hidden=true; return; }
     b.dataset.payload=[
       ['#ALT_META',ctx.altTitle||document.querySelector('h1')?.innerText||document.title,ctx.grade,location.href,ctx.cert].join('\t'),
       ...rows.slice(0,2).map(x=>[x.date,x.price.toFixed(2),x.site,x.href].join('\t'))

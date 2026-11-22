@@ -18,6 +18,29 @@ function getAppState() {
   };
 }
 
+function ensureSummarySheet(dateInput) {
+  const id = PropertiesService.getScriptProperties().getProperty(PSA_ALT_PROPERTIES.targetSpreadsheetId);
+  if (!id) throw new Error('最初に対象スプレッドシートを設定してください。');
+  const match = String(dateInput || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) throw new Error('対象日を選択してください。');
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  if (date.getFullYear() !== Number(match[1]) || date.getMonth() !== Number(match[2]) - 1 || date.getDate() !== Number(match[3])) {
+    throw new Error('対象日が正しくありません。');
+  }
+  const ss = SpreadsheetApp.openById(id);
+  const name = Utilities.formatDate(date, ss.getSpreadsheetTimeZone(), 'M/d') + ' まとめ';
+  let sheet = ss.getSheetByName(name);
+  if (!sheet) {
+    sheet = ss.insertSheet(name);
+    sheet.getRange(1, 1, 1, 11).setValues([[
+      '証明番号', 'カード名', 'カード画像', '採用価格 USD', 'ALTリンク', '前回成約 USD', '', '採用価格 USD', '', '', '最新成約 USD'
+    ]]);
+    sheet.setFrozenRows(1);
+  }
+  summaryColumns_(sheet);
+  return { sheet: name };
+}
+
 /**
  * Run once from the Apps Script editor opened via this spreadsheet's
  * Extensions > Apps Script menu. This binds the web app to its container
@@ -135,7 +158,7 @@ function fetchPsaCert_(cert) {
   const grade = `PSA ${Number(gradeMatch[2])}`;
   const imgTag = (html.match(/<img\b[^>]*\balt=["']Cert image 1["'][^>]*>/i) || [])[0] || '';
   const src = imgTag.match(/\bsrc=["']([^"']+)["']/i);
-  return { cert, name, grade, imageUrl: src ? decodeHtml_(src[1]) : '', url };
+  return { cert, name, grade, imageUrl: src ? decodeHtml_(src[1]) : '', url: `https://www.psacard.com/cert/${encodeURIComponent(cert)}/psa` };
 }
 
 function parseAltPaste_(text) {
