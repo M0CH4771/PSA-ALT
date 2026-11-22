@@ -40,6 +40,8 @@
     say(`鑑定番号 ${cert} でALT検索中です。候補カードを確認しています…`);
   }
 
+  b.hidden=/^\/browse\/?$/.test(location.pathname);
+
   function candidateButtons() {
     const ignored = /^(?:view all|hide filters|show filters|sort by|sold listings|saved searches|save search|buy|buy \/ offer|all items|auctions|fixed price)$/i;
     const byText = new Map();
@@ -132,6 +134,10 @@
   async function autoResearch() {
     const ctx=readContext();
     if(!ctx || !/^\/itm\/[0-9a-f-]+\/research\/?$/i.test(location.pathname)) return;
+    if(ctx.route==='browse') { ctx.route='opening'; saveContext(ctx); }
+    if(ctx.route!=='opening' && ctx.route!=='research') return;
+    if(ctx.route==='research' && ctx.researchPath!==location.pathname) return;
+    if(ctx.route==='opening') { ctx.route='research'; ctx.researchPath=location.pathname; saveContext(ctx); }
     const key=`research:${location.pathname}:${ctx.grade}`;
     if(runningFor===key) return;
     runningFor=key;
@@ -203,7 +209,7 @@
   captureSearchRequest();
   let lastPath=location.pathname;
   setInterval(()=>{
-    if(location.pathname!==lastPath) { lastPath=location.pathname; runningFor=''; }
+    if(location.pathname!==lastPath) { lastPath=location.pathname; runningFor=''; b.hidden=/^\/browse\/?$/.test(location.pathname); }
     if(/^\/browse\/?$/.test(location.pathname)) openSingleCertCandidate();
     else autoResearch();
   },500);
