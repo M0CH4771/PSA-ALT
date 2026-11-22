@@ -55,6 +55,7 @@ function writePricedCard(payload) {
   const cert = normalizeCert_(payload.cert);
   const psa = fetchPsaCert_(cert); // Re-fetch official record; do not trust client-supplied card data.
   const alt = parseAltPaste_(payload.altData);
+  if (alt.cert !== cert) throw new Error('ALTを今回のPSA鑑定番号から検索した記録ではありません。Webアプリの「ALTを自動検索」からやり直してください。');
   if (alt.grade !== psa.grade) throw new Error(`グレード不一致です。PSA公式=${psa.grade} / ALT=${alt.grade}`);
   if (!isAltResearchUrl_(alt.url)) throw new Error('ALTの「/research」ページURLを確認してください。');
   if (alt.sales.length < 2) throw new Error('有効な成約を2件確認できません。価格は記入しません。');
@@ -146,7 +147,8 @@ function parseAltPaste_(text) {
   const gradeMatch = String(meta[2] || '').match(/PSA\s*(\d+(?:\.5)?)/i);
   const grade = gradeMatch ? `PSA ${Number(gradeMatch[1])}` : '';
   const url = String(meta[3] || '').trim();
-  if (!name || !grade || !url) throw new Error('ALTカード名・表示グレード・ページURLが読み取れません。');
+  const cert = String(meta[4] || '').replace(/\D/g, '');
+  if (!name || !grade || !url || !cert) throw new Error('ALTカード名・表示グレード・ページURL・検索した鑑定番号が読み取れません。ALT自動検索からやり直してください。');
 
   const sales = [];
   const seen = new Set();
@@ -166,7 +168,7 @@ function parseAltPaste_(text) {
     sales.push({ date, price: Math.round(price * 100) / 100, site: site || '不明', url: saleUrl });
   }
   sales.sort((a, b) => b.date.localeCompare(a.date));
-  return { name, grade, url, sales };
+  return { name, grade, url, cert, sales };
 }
 
 function summaryColumns_(sheet) {
