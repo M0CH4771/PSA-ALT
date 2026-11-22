@@ -56,8 +56,9 @@ function initializeBoundSpreadsheet() {
 
 function lookupPsaCert(certInput, nonce) {
   const cert = normalizeCert_(certInput);
-  const token = String(nonce || '');
-  if (!/^[\w-]{10,100}$/.test(token)) throw new Error('調査セッションが無効です。最初からやり直してください。');
+  // Generate the correlation token server-side so Apps Script and the browser
+  // always use the same value, even if an older page passes an empty token.
+  const token = Utilities.getUuid().replace(/-/g, '');
   const url = `https://www.psacard.com/cert/${encodeURIComponent(cert)}/psa?psaBatch=1&psaCert=${encodeURIComponent(cert)}&psaNonce=${encodeURIComponent(token)}`;
   return { cert, nonce: token, psaUrl: url };
 }
