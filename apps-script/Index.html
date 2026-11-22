@@ -44,10 +44,8 @@
   <main>
     <section class="card" id="setup">
       <h2>初回設定</h2>
-      <p class="small">価格調査先スプレッドシートのURLからIDを入力します。IDはApps Scriptのプロパティに保存し、GitHub上のコードには含めません。</p>
-      <label for="spreadsheetId">価格調査スプレッドシートID</label>
-      <div class="row"><input id="spreadsheetId" autocomplete="off" placeholder="URL内の /d/ と /edit の間"><button onclick="saveSettings()">接続</button></div>
-      <div id="setupStatus"></div>
+      <p class="small">このWebアプリは、このスプレッドシート専用です。対象シートを開き、「拡張機能 → Apps Script」で関数 <code>initializeBoundSpreadsheet</code> を1回実行してから、Webアプリを再読み込みしてください。シートIDの入力は不要です。</p>
+      <div id="setupStatus" class="error">初回の紐づけが必要です。</div>
     </section>
 
     <section class="card" id="workflow" hidden>
@@ -90,6 +88,7 @@
   function init() {
     google.script.run.withSuccessHandler(state => {
       if (!state.configured) { $('setup').style.display='block'; return; }
+      $('setup').style.display='none';
       $('workflow').hidden=false;
       populateSheets(state.sheets);
       $('cert').focus();
@@ -99,11 +98,6 @@
     const select=$('targetSheet'); select.innerHTML='';
     (sheets||[]).forEach(name => { const o=document.createElement('option'); o.value=name; o.textContent=name; select.appendChild(o); });
     if (!sheets || !sheets.length) showMessage('setupStatus','「11/20 まとめ」のような日付まとめシートがありません。','error');
-  }
-  function saveSettings() {
-    const id=$('spreadsheetId').value.trim();
-    google.script.run.withSuccessHandler(result => { $('setup').style.display='none'; $('workflow').hidden=false; populateSheets(result.sheets); $('cert').focus(); })
-      .withFailureHandler(err => showMessage('setupStatus', err.message || String(err), 'error')).saveTargetSpreadsheetId(id);
   }
   function lookup() {
     const cert=$('cert').value.trim();
