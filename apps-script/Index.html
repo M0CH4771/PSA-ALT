@@ -97,27 +97,47 @@
     let index=startIndex;
     while(index<queue.length && queue[index].kind==='done') index++;
     if (index>=queue.length) { finishBatch('一括処理が完了しました。'); return; }
-    activeIndex=index; setItem(index,'PSA照合中…','running','');
-    google.script.run.withSuccessHandler(psa=>{
-      queue[index].psa=psa;
+    activeIndex=index; setItem(index,'PSA公式を確認中…','running','');
+    google.script.run.withSuccessHandler(request=>{
+      if (!popup || popup.closed) { setItem(index,'保留','hold','PSA確認ウィンドウが閉じられました。'); return processNext(index+1); }
+      popup.location.href=request.psaUrl;
+      armTimeout(index,'PSAから応答がありません。PSA用TampermonkeyスクリプトとPSAページの表示を確認してください。');
+    }).withFailureHandler(err=>{
+      setItem(index,'保留','hold',`PSA照合の準備: ${err.message||String(err)}`); processNext(index+1);
+    }).lookupPsaCert(queue[index].cert,batchNonce);
+  }
+  function armTimeout(index,reason) {
+    clearTimeout(activeTimer);
+    activeTimer=setTimeout(()=>{
+      if (!busy || activeIndex!==index) return;
+      setItem(index,'保留','hold',reason); processNext(index+1);
+    },90000);
+  }
+  function onMessage(event) {
+    const data=event.data;
+    if (!busy || event.source!==popup || !data || data.nonce!==batchNonce || activeIndex<0) return;
+    if (data.type==='PSA_CERT_RESULT') {
+      if (event.origin!=='https://www.psacard.com') return;
+      const index=activeIndex, cert=queue[index].cert;
+      if (String(data.cert)!==cert || !data.ok) {
+        clearTimeout(activeTimer);
+        setItem(index,'保留','hold',data.reason||'PSA公式ページで鑑定情報を確認できません。'); return processNext(index+1);
+      }
+      const psa={cert,name:String(data.name||'').trim(),grade:String(data.grade||'').trim(),imageUrl:String(data.imageUrl||''),url:String(data.url||'')};
+      if (!psa.name || !/^PSA \d+(?:\.5)?$/.test(psa.grade) || !new RegExp(`^https://www\\.psacard\\.com/cert/${cert}/psa/?$`,'i').test(psa.url)) {
+        clearTimeout(activeTimer); setItem(index,'保留','hold','PSAページの番号・カード名・グレードを照合できません。'); return processNext(index+1);
+      }
+      clearTimeout(activeTimer); queue[index].psa=psa;
       setItem(index,'ALT成約を検索中…','running',`${psa.name} / ${psa.grade}`);
-      const url=new URL(psa.altSearchUrl);
+      const url=new URL('https://alt.xyz/browse');
+      url.searchParams.set('query',cert); url.searchParams.set('psaGrade',psa.grade.replace(/^PSA\s*/i,''));
       url.searchParams.set('psaBatch','1'); url.searchParams.set('psaNonce',batchNonce); url.searchParams.set('psaName',psa.name);
       if (!popup || popup.closed) { setItem(index,'保留','hold','ALT検索ウィンドウが閉じられました。'); return processNext(index+1); }
       popup.location.href=url.href;
-      clearTimeout(activeTimer);
-      activeTimer=setTimeout(()=>{
-        if (!busy || activeIndex!==index) return;
-        setItem(index,'保留','hold','ALTから応答がありません。Tampermonkey、ALTログイン状態、ポップアップを確認してください。');
-        processNext(index+1);
-      },90000);
-    }).withFailureHandler(err=>{
-      setItem(index,'保留','hold',`PSA照合: ${err.message||String(err)}`); processNext(index+1);
-    }).lookupPsaCert(queue[index].cert);
-  }
-  function onAltResult(event) {
-    const data=event.data;
-    if (!busy || event.origin!=='https://alt.xyz' || event.source!==popup || !data || data.type!=='PSA_ALT_BATCH_RESULT' || data.nonce!==batchNonce || activeIndex<0) return;
+      armTimeout(index,'ALTから応答がありません。ALT用Tampermonkeyスクリプト、ALTページ、ポップアップを確認してください。');
+      return;
+    }
+    if (event.origin!=='https://alt.xyz' || data.type!=='PSA_ALT_BATCH_RESULT') return;
     clearTimeout(activeTimer);
     const index=activeIndex, psa=queue[index].psa;
     if (String(data.cert)!==psa.cert || String(data.grade)!==psa.grade) {
@@ -133,7 +153,7 @@
       processNext(index+1);
     }).withFailureHandler(err=>{
       setItem(index,'保留','hold',`シート記入: ${err.message||String(err)}`); processNext(index+1);
-    }).writePricedCard({cert:psa.cert,targetSheet,altData:lines,matchConfirmed:true});
+    }).writePricedCard({cert:psa.cert,psa,targetSheet,altData:lines,matchConfirmed:true});
   }
   function finishBatch(message) {
     clearTimeout(activeTimer);
@@ -142,7 +162,7 @@
     const done=queue.filter(x=>x.kind==='done').length, held=queue.filter(x=>x.kind==='hold').length;
     say(`${message}\n反映 ${done}件 / 保留 ${held}件。保留理由は各番号の下に表示しています。`,held?'':'success'); $('cert').focus();
   }
-  window.addEventListener('message',onAltResult);
+  window.addEventListener('message',onMessage);
   $('cert').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();addCert();}});
   init();
 </script>
