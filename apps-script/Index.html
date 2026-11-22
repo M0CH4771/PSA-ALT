@@ -35,7 +35,7 @@
       <p class="small">対象スプレッドシートから「拡張機能 → Apps Script」を開き、<code>initializeBoundSpreadsheet</code>を一度実行してから再読み込みしてください。シートIDの入力は不要です。</p>
       <div id="setupStatus" class="error">初回の紐づけが必要です。</div>
     </section>
-    <section class="card" id="workflow" hidden>
+    <section class="card" id="workflow">
       <h2>1. 日付を選んで鑑定番号を連続スキャン</h2>
       <label for="targetDate">記入する日付</label><input id="targetDate" type="date">
       <label for="cert">PSA証明番号</label>
@@ -43,7 +43,7 @@
       <p class="small">読み取るたびに番号が下のリストへ追加されます。同じリスト内の重複番号は追加しません。</p>
       <ul id="queue"></ul>
       <div class="actions"><button id="processButton" onclick="startBatch()">検索して反映</button><button class="secondary" onclick="clearQueue()">リストをクリア</button></div>
-      <div id="status" class="small" aria-live="polite"></div>
+      <div id="status" class="small" aria-live="polite">画面を表示しました。続けて日付を選び、鑑定番号をスキャンしてください。</div>
     </section>
   </main>
 <script>
