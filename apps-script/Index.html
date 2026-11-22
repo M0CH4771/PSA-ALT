@@ -3,178 +3,416 @@
 <head>
   <base target="_top">
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
     :root { color-scheme: light; --ink:#13233a; --muted:#61718a; --line:#dbe3ed; --blue:#2654c7; --bg:#f3f6fb; --green:#16794a; --red:#b42318; --amber:#8a5a00; }
     * { box-sizing:border-box; }
     body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; }
-    header { background:#10253e; color:#fff; padding:22px max(20px,calc((100vw - 960px)/2)); }
-    header h1 { font-size:22px; margin:0; } header p { color:#d3deeb; margin:5px 0 0; font-size:14px; }
-    main { max-width:960px; margin:22px auto; padding:0 18px 40px; }
-    .card { background:#fff; border:1px solid var(--line); border-radius:14px; padding:20px; margin:16px 0; box-shadow:0 3px 12px #1b36520a; }
-    h2 { font-size:18px; margin:0 0 14px; } label { display:block; font-size:14px; font-weight:650; margin:12px 0 6px; }
-    input { width:100%; border:1px solid #aebdce; border-radius:8px; background:white; padding:11px 12px; font:inherit; color:var(--ink); }
+    header { background:#10253e; color:#fff; padding:20px max(18px,calc((100vw - 900px)/2)); }
+    header h1 { font-size:22px; margin:0; }
+    header p { color:#d3deeb; margin:5px 0 0; font-size:14px; }
+    main { max-width:900px; margin:20px auto; padding:0 16px 40px; }
+    .card { background:#fff; border:1px solid var(--line); border-radius:12px; padding:20px; margin:16px 0; box-shadow:0 3px 12px #1b36520a; }
+    label { display:block; font-size:14px; font-weight:700; margin:12px 0 6px; }
+    input { width:100%; border:1px solid #aebdce; border-radius:8px; padding:11px 12px; font:inherit; color:var(--ink); background:#fff; }
     input:focus { outline:3px solid #c9d8ff; border-color:var(--blue); }
-    button { border:0; border-radius:8px; background:var(--blue); color:white; padding:11px 16px; font:inherit; font-weight:700; cursor:pointer; }
-    button.secondary { background:#eaf0fb; color:#193c85; } button.danger { background:#fff0ef; color:#9b1c13; }
+    button { border:0; border-radius:8px; background:var(--blue); color:#fff; padding:11px 15px; font:inherit; font-weight:700; cursor:pointer; }
+    button.secondary { background:#eaf0fb; color:#193c85; }
     button:disabled { opacity:.55; cursor:wait; }
-    .row { display:grid; grid-template-columns:1fr auto; gap:10px; align-items:end; } .small { font-size:13px; color:var(--muted); margin:7px 0; }
-    .error { color:var(--red); font-weight:600; white-space:pre-wrap; } .success { color:var(--green); font-weight:700; white-space:pre-wrap; }
-    #setup { display:none; } #workflow[hidden] { display:none; }
-    #queue { list-style:none; margin:12px 0 0; padding:0; } #queue li { display:grid; grid-template-columns:1fr auto; gap:12px; align-items:center; border-top:1px solid var(--line); padding:10px 0; }
-    .cert { font-weight:750; font-variant-numeric:tabular-nums; } .detail { display:block; font-size:13px; color:var(--muted); white-space:pre-wrap; }
-    .status { font-size:13px; font-weight:700; white-space:nowrap; } .status.done { color:var(--green); } .status.hold { color:var(--amber); } .status.running { color:var(--blue); }
-    .actions { display:flex; gap:10px; flex-wrap:wrap; margin-top:16px; }
-    @media(max-width:620px) { .row { grid-template-columns:1fr; } #queue li { grid-template-columns:1fr; gap:4px; } }
+    .scanRow { display:grid; grid-template-columns:1fr auto; gap:10px; align-items:end; }
+    .dateRow { max-width:280px; }
+    .small { color:var(--muted); font-size:13px; margin:7px 0; }
+    #status { min-height:24px; white-space:pre-wrap; margin-top:14px; }
+    #status.error { color:var(--red); font-weight:700; }
+    #status.success { color:var(--green); font-weight:700; }
+    #queue { list-style:none; margin:12px 0 0; padding:0; }
+    #queue li { display:grid; grid-template-columns:1fr auto; align-items:center; gap:10px; border-top:1px solid var(--line); padding:10px 0; }
+    .cert { font-weight:750; font-variant-numeric:tabular-nums; }
+    .detail { display:block; color:var(--muted); font-size:13px; white-space:pre-wrap; }
+    .badge { font-size:13px; font-weight:700; white-space:nowrap; }
+    .waiting { color:#536579; } .running { color:var(--blue); } .done { color:var(--green); } .hold { color:var(--amber); }
+    .actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:16px; }
+    @media(max-width:600px) { .scanRow { grid-template-columns:1fr; } #queue li { grid-template-columns:1fr; } }
   </style>
 </head>
 <body>
-  <header><h1>PSA バーコード価格調査</h1><p>複数枚を連続スキャン →「検索して反映」でPSA・ALT確認とシート記入</p></header>
+  <header>
+    <h1>PSA バーコード価格調査</h1>
+    <p>連続スキャン → 一括検索 → PSA・ALT確認 → 日付まとめへ記入</p>
+  </header>
   <main>
-    <section class="card" id="setup">
-      <h2>初回設定</h2>
-      <p class="small">対象スプレッドシートから「拡張機能 → Apps Script」を開き、<code>initializeBoundSpreadsheet</code>を一度実行してから再読み込みしてください。シートIDの入力は不要です。</p>
-      <div id="setupStatus" class="error">初回の紐づけが必要です。</div>
-    </section>
-    <section class="card" id="workflow">
-      <h2>1. 日付を選んで鑑定番号を連続スキャン</h2>
-      <label for="targetDate">記入する日付</label><input id="targetDate" type="date">
+    <section class="card">
+      <h2>鑑定番号を読み取る</h2>
+      <label for="targetDate">記入する日付</label>
+      <div class="dateRow"><input id="targetDate" type="date"></div>
       <label for="cert">PSA証明番号</label>
-      <div class="row"><input id="cert" inputmode="numeric" autocomplete="off" placeholder="バーコードを読み取ると自動で追加されます"><button id="addButton" onclick="addCert()">リストに追加</button></div>
-      <p class="small">スキャン入力が終わると自動でリストに追加されます。Enterキーや「リストに追加」ボタンでも追加できます。同じリスト内の重複番号は追加しません。</p>
+      <div class="scanRow">
+        <input id="cert" inputmode="numeric" autocomplete="off" placeholder="バーコードを読むと自動でリストに追加">
+        <button id="addButton" type="button" class="secondary">手動で追加</button>
+      </div>
+      <p class="small">スキャナーのEnter送信がなくても、入力が止まると自動追加します。読み取り後、約0.5秒でリストに入ります。</p>
       <ul id="queue"></ul>
-      <div class="actions"><button id="processButton" onclick="startBatch()">検索して反映</button><button class="secondary" onclick="clearQueue()">リストをクリア</button></div>
-      <div id="status" class="small" aria-live="polite">画面を表示しました。続けて日付を選び、鑑定番号をスキャンしてください。</div>
+      <div class="actions">
+        <button id="processButton" type="button">検索して反映</button>
+        <button id="clearButton" type="button" class="secondary">リストをクリア</button>
+      </div>
+      <div id="status" class="small" aria-live="polite">ページを起動しています…</div>
     </section>
   </main>
 <script>
-  const $ = id => document.getElementById(id);
-  const queue = [];
-  let popup = null, activeIndex = -1, batchNonce = '', targetSheet = '', busy = false, activeTimer = null, autoAddTimer = null;
-  const today = new Date();
-  $('targetDate').value = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
-  function say(text, type='') { const el=$('status'); el.textContent=text; el.className=type||'small'; }
-  function init() {
-    // Do not wait for a server call before showing the form. The bound-sheet
-    // authorization is checked when the user starts a batch, with errors shown in the app.
-    $('setup').style.display='none';
-    $('workflow').hidden=false;
-    $('cert').focus();
-    say('準備完了です。日付を選んでバーコードを読み取ってください。');
+(function() {
+  'use strict';
+
+  var queue = [];
+  var popupWindow = null;
+  var activeIndex = -1;
+  var activeStage = '';
+  var activeNonce = '';
+  var targetSheetName = '';
+  var busy = false;
+  var autoAddTimer = null;
+  var stageTimer = null;
+
+  var $ = function(id) { return document.getElementById(id); };
+
+  function setStatus(message, type) {
+    var status = $('status');
+    status.textContent = message;
+    status.className = type || 'small';
   }
-  function addCert() {
-    if (busy) return;
-    const input=$('cert'), cert=input.value.replace(/\D/g,''); input.value='';
-    if (!/^\d{6,12}$/.test(cert)) { say('PSA鑑定番号は6〜12桁で読み取ってください。','error'); input.focus(); return; }
-    if (queue.some(x=>x.cert===cert)) { say(`鑑定番号 ${cert} はすでにリストにあります。`); input.focus(); return; }
-    queue.push({cert,status:'待機中',detail:''}); renderQueue(); say(`${cert} を追加しました。続けてスキャンしてください。`); input.focus();
+
+  function digits(value) {
+    return String(value || '').replace(/\D/g, '');
   }
+
   function renderQueue() {
-    const list=$('queue'); list.innerHTML='';
-    queue.forEach((item,index)=>{
-      const li=document.createElement('li');
-      const left=document.createElement('div'); left.innerHTML=`<span class="cert"></span><span class="detail"></span>`;
-      left.querySelector('.cert').textContent=item.cert; left.querySelector('.detail').textContent=item.detail;
-      const right=document.createElement('div'); right.style.display='flex'; right.style.gap='12px'; right.style.alignItems='center';
-      const status=document.createElement('span'); status.className=`status ${item.kind||''}`; status.textContent=item.status; right.append(status);
-      if (!busy && item.kind!=='done') { const del=document.createElement('button'); del.className='secondary'; del.textContent='削除'; del.onclick=()=>{queue.splice(index,1);renderQueue();}; right.append(del); }
-      li.append(left,right); list.append(li);
+    var list = $('queue');
+    list.textContent = '';
+    queue.forEach(function(item, index) {
+      var li = document.createElement('li');
+      var left = document.createElement('div');
+      var cert = document.createElement('span');
+      cert.className = 'cert';
+      cert.textContent = item.cert;
+      var detail = document.createElement('span');
+      detail.className = 'detail';
+      detail.textContent = item.detail || '';
+      left.appendChild(cert);
+      left.appendChild(detail);
+
+      var right = document.createElement('div');
+      var badge = document.createElement('span');
+      badge.className = 'badge ' + (item.state || 'waiting');
+      badge.textContent = item.status;
+      right.appendChild(badge);
+
+      if (!busy && item.state !== 'done') {
+        var remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'secondary';
+        remove.textContent = '削除';
+        remove.addEventListener('click', function() {
+          queue.splice(index, 1);
+          renderQueue();
+        });
+        right.appendChild(remove);
+      }
+      li.appendChild(left);
+      li.appendChild(right);
+      list.appendChild(li);
     });
   }
-  function clearQueue() { if (busy) return; queue.splice(0); renderQueue(); say('リストを空にしました。'); }
-  function setItem(index,status,kind,detail='') { Object.assign(queue[index],{status,kind,detail}); renderQueue(); }
-  function startBatch() {
+
+  function addCert() {
     if (busy) return;
-    if (!queue.length) { say('先に鑑定番号を1件以上読み取ってください。','error'); return; }
-    if (!$('targetDate').value) { say('記入する日付を選択してください。','error'); return; }
-    popup=window.open('about:blank','psaAltBatchSearch');
-    if (!popup) { say('ALT検索画面を開けませんでした。ブラウザでこのサイトのポップアップを許可してからやり直してください。','error'); return; }
-    busy=true; $('processButton').disabled=true; $('addButton').disabled=true;
-    batchNonce=`${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    say('日付まとめシートを準備しています…');
-    google.script.run.withSuccessHandler(result=>{
-      targetSheet=result.sheet; processNext(0);
-    }).withFailureHandler(err=>finishBatch(`シート準備エラー: ${err.message||String(err)}`)).ensureSummarySheet($('targetDate').value);
-  }
-  function processNext(startIndex) {
-    let index=startIndex;
-    while(index<queue.length && queue[index].kind==='done') index++;
-    if (index>=queue.length) { finishBatch('一括処理が完了しました。'); return; }
-    activeIndex=index; setItem(index,'PSA公式を確認中…','running','');
-    google.script.run.withSuccessHandler(request=>{
-      batchNonce=request.nonce;
-      if (!popup || popup.closed) { setItem(index,'保留','hold','PSA確認ウィンドウが閉じられました。'); return processNext(index+1); }
-      popup.location.href=request.psaUrl;
-      armTimeout(index,'PSAから応答がありません。PSA用TampermonkeyスクリプトとPSAページの表示を確認してください。');
-    }).withFailureHandler(err=>{
-      setItem(index,'保留','hold',`PSA照合の準備: ${err.message||String(err)}`); processNext(index+1);
-    }).lookupPsaCert(queue[index].cert,batchNonce);
-  }
-  function armTimeout(index,reason) {
-    clearTimeout(activeTimer);
-    activeTimer=setTimeout(()=>{
-      if (!busy || activeIndex!==index) return;
-      setItem(index,'保留','hold',reason); processNext(index+1);
-    },90000);
-  }
-  function onMessage(event) {
-    const data=event.data;
-    if (!busy || event.source!==popup || !data || data.nonce!==batchNonce || activeIndex<0) return;
-    if (data.type==='PSA_CERT_RESULT') {
-      if (event.origin!=='https://www.psacard.com') return;
-      const index=activeIndex, cert=queue[index].cert;
-      if (String(data.cert)!==cert || !data.ok) {
-        clearTimeout(activeTimer);
-        setItem(index,'保留','hold',data.reason||'PSA公式ページで鑑定情報を確認できません。'); return processNext(index+1);
-      }
-      const psa={cert,name:String(data.name||'').trim(),grade:String(data.grade||'').trim(),imageUrl:String(data.imageUrl||''),url:String(data.url||'')};
-      if (!psa.name || !/^PSA \d+(?:\.5)?$/.test(psa.grade) || !new RegExp(`^https://www\\.psacard\\.com/cert/${cert}/psa/?$`,'i').test(psa.url)) {
-        clearTimeout(activeTimer); setItem(index,'保留','hold','PSAページの番号・カード名・グレードを照合できません。'); return processNext(index+1);
-      }
-      clearTimeout(activeTimer); queue[index].psa=psa;
-      setItem(index,'ALT成約を検索中…','running',`${psa.name} / ${psa.grade}`);
-      const url=new URL('https://alt.xyz/browse');
-      url.searchParams.set('query',cert); url.searchParams.set('psaGrade',psa.grade.replace(/^PSA\s*/i,''));
-      url.searchParams.set('psaBatch','1'); url.searchParams.set('psaNonce',batchNonce); url.searchParams.set('psaName',psa.name);
-      if (!popup || popup.closed) { setItem(index,'保留','hold','ALT検索ウィンドウが閉じられました。'); return processNext(index+1); }
-      popup.location.href=url.href;
-      armTimeout(index,'ALTから応答がありません。ALT用Tampermonkeyスクリプト、ALTページ、ポップアップを確認してください。');
+    clearTimeout(autoAddTimer);
+    var input = $('cert');
+    var cert = digits(input.value);
+    if (!/^\d{6,12}$/.test(cert)) {
+      if (cert.length) setStatus('鑑定番号は6〜12桁で読み取ってください。', 'error');
+      input.focus();
       return;
     }
-    if (event.origin!=='https://alt.xyz' || data.type!=='PSA_ALT_BATCH_RESULT') return;
-    clearTimeout(activeTimer);
-    const index=activeIndex, psa=queue[index].psa;
-    if (String(data.cert)!==psa.cert || String(data.grade)!==psa.grade) {
-      setItem(index,'保留','hold','ALTの鑑定番号またはPSAグレードが一致しません。'); return processNext(index+1);
+    input.value = '';
+    if (queue.some(function(item) { return item.cert === cert; })) {
+      setStatus('鑑定番号 ' + cert + ' はすでにリストにあります。');
+      input.focus();
+      return;
     }
-    if (!data.ok) { setItem(index,'保留','hold',data.reason||'ALTで条件一致の成約2件を確認できませんでした。'); return processNext(index+1); }
-    const sales=Array.isArray(data.sales)?data.sales:[];
-    if (sales.length<2) { setItem(index,'保留','hold','ALTの一致成約が2件未満です。価格は記入していません。'); return processNext(index+1); }
-    const lines=[['#ALT_META',data.title||psa.name,data.grade,data.url,data.cert].join('\t'),...sales.slice(0,2).map(s=>[s.date,s.price,s.site,s.url].join('\t'))].join('\n');
-    setItem(index,'シート記入中…','running',`${sales[0].date} $${sales[0].price} / ${sales[1].date} $${sales[1].price}`);
-    google.script.run.withSuccessHandler(result=>{
-      setItem(index,'反映済み','done',`${result.sheet} ${result.row}行目 / ${psa.name} / ${psa.grade} / 採用 $${result.adopted}`);
-      processNext(index+1);
-    }).withFailureHandler(err=>{
-      setItem(index,'保留','hold',`シート記入: ${err.message||String(err)}`); processNext(index+1);
-    }).writePricedCard({cert:psa.cert,psa,targetSheet,altData:lines,matchConfirmed:true});
+    queue.push({ cert: cert, state: 'waiting', status: '待機中', detail: '' });
+    renderQueue();
+    setStatus(cert + ' を追加しました。続けてスキャンしてください。');
+    input.focus();
   }
-  function finishBatch(message) {
-    clearTimeout(activeTimer);
-    busy=false; activeIndex=-1; $('processButton').disabled=false; $('addButton').disabled=false;
-    if (popup && !popup.closed) popup.close(); popup=null; renderQueue();
-    const done=queue.filter(x=>x.kind==='done').length, held=queue.filter(x=>x.kind==='hold').length;
-    say(`${message}\n反映 ${done}件 / 保留 ${held}件。保留理由は各番号の下に表示しています。`,held?'':'success'); $('cert').focus();
-  }
-  window.addEventListener('message',onMessage);
-  $('cert').addEventListener('input',()=>{
+
+  function onScannerInput() {
+    if (busy) return;
     clearTimeout(autoAddTimer);
-    autoAddTimer=setTimeout(()=>{
-      const value=$('cert').value.replace(/\\D/g,'');
-      if (value.length>=6 && value.length<=12) addCert();
-    },500);
+    autoAddTimer = setTimeout(function() {
+      var cert = digits($('cert').value);
+      if (/^\d{6,12}$/.test(cert)) addCert();
+    }, 600);
+  }
+
+  function setItem(index, state, status, detail) {
+    if (!queue[index]) return;
+    queue[index].state = state;
+    queue[index].status = status;
+    queue[index].detail = detail || '';
+    renderQueue();
+  }
+
+  function armStageTimeout(index, stage, message) {
+    clearTimeout(stageTimer);
+    stageTimer = setTimeout(function() {
+      if (!busy || activeIndex !== index || activeStage !== stage) return;
+      setItem(index, 'hold', '保留', message);
+      processNext(index + 1);
+    }, 60000);
+  }
+
+  function startBatch() {
+    if (busy) return;
+    if (!queue.length) {
+      setStatus('鑑定番号がリストにありません。まずバーコードを読み取ってください。', 'error');
+      $('cert').focus();
+      return;
+    }
+    if (!$('targetDate').value) {
+      setStatus('記入する日付を選択してください。', 'error');
+      return;
+    }
+
+    popupWindow = window.open('about:blank', 'psaAltBatchSearch');
+    if (!popupWindow) {
+      setStatus('検索用ポップアップがブロックされました。このWebアプリのポップアップを許可してください。', 'error');
+      return;
+    }
+
+    busy = true;
+    $('processButton').disabled = true;
+    $('addButton').disabled = true;
+    $('clearButton').disabled = true;
+    setStatus('日付まとめシートを準備しています…');
+
+    activeStage = 'sheet';
+    armStageTimeout(-1, 'sheet', 'Apps Scriptから応答がありません。認可状態と対象シートの紐づけを確認してください。');
+    google.script.run
+      .withSuccessHandler(function(result) {
+        clearTimeout(stageTimer);
+        if (!busy) return;
+        targetSheetName = result.sheet;
+        processNext(0);
+      })
+      .withFailureHandler(function(error) {
+        clearTimeout(stageTimer);
+        finishBatch('シート準備エラー: ' + errorText(error));
+      })
+      .ensureSummarySheet($('targetDate').value);
+  }
+
+  function processNext(startIndex) {
+    var index = startIndex;
+    while (index < queue.length && queue[index].state === 'done') index++;
+    if (index >= queue.length) {
+      finishBatch('一括処理が完了しました。');
+      return;
+    }
+    if (!popupWindow || popupWindow.closed) {
+      setItem(index, 'hold', '保留', '検索用ポップアップが閉じられました。');
+      return processNext(index + 1);
+    }
+
+    activeIndex = index;
+    activeStage = 'psa-request';
+    setItem(index, 'running', 'PSA照合を開始…', '');
+
+    armStageTimeout(index, 'psa-request', 'PSA照合の準備でApps Scriptから応答がありません。');
+    google.script.run
+      .withSuccessHandler(function(request) {
+        if (!busy || activeIndex !== index) return;
+        clearTimeout(stageTimer);
+        activeNonce = request.nonce;
+        activeStage = 'psa-page';
+        setItem(index, 'running', 'PSA公式を確認中…', '');
+        popupWindow.location.href = request.psaUrl;
+        armStageTimeout(index, 'psa-page', 'PSAページから返事がありません。PSA用Tampermonkeyスクリプトが有効か確認してください。');
+      })
+      .withFailureHandler(function(error) {
+        if (!busy || activeIndex !== index) return;
+        clearTimeout(stageTimer);
+        setItem(index, 'hold', '保留', 'PSA照合の準備: ' + errorText(error));
+        processNext(index + 1);
+      })
+      .lookupPsaCert(queue[index].cert);
+  }
+
+  function handlePsaResult(event, data) {
+    if (event.origin !== 'https://www.psacard.com') return;
+    if (activeStage !== 'psa-page') return;
+    var index = activeIndex;
+    var cert = queue[index].cert;
+    if (String(data.cert) !== cert || !data.ok) {
+      clearTimeout(stageTimer);
+      setItem(index, 'hold', '保留', data.reason || 'PSA公式ページで鑑定情報を確認できません。');
+      processNext(index + 1);
+      return;
+    }
+
+    var psa = {
+      cert: cert,
+      name: String(data.name || '').trim(),
+      grade: String(data.grade || '').trim(),
+      imageUrl: String(data.imageUrl || ''),
+      url: String(data.url || '')
+    };
+    if (!psa.name || !/^PSA \d+(?:\.5)?$/.test(psa.grade) || !isCanonicalPsaUrl(psa.url, cert)) {
+      clearTimeout(stageTimer);
+      setItem(index, 'hold', '保留', 'PSA番号・カード名・グレードを照合できません。');
+      processNext(index + 1);
+      return;
+    }
+
+    clearTimeout(stageTimer);
+    queue[index].psa = psa;
+    activeStage = 'alt-page';
+    setItem(index, 'running', 'ALT成約を検索中…', psa.name + ' / ' + psa.grade);
+
+    var altUrl = new URL('https://alt.xyz/browse');
+    altUrl.searchParams.set('query', cert);
+    altUrl.searchParams.set('psaGrade', psa.grade.replace(/^PSA\s*/i, ''));
+    altUrl.searchParams.set('psaBatch', '1');
+    altUrl.searchParams.set('psaNonce', activeNonce);
+    altUrl.searchParams.set('psaName', psa.name);
+    popupWindow.location.href = altUrl.href;
+    armStageTimeout(index, 'alt-page', 'ALTから返事がありません。ALT用Tampermonkeyスクリプトや検索ページを確認してください。');
+  }
+
+  function handleAltResult(event, data) {
+    if (event.origin !== 'https://alt.xyz') return;
+    if (activeStage !== 'alt-page') return;
+    var index = activeIndex;
+    var psa = queue[index].psa;
+    if (!psa || String(data.cert) !== psa.cert || String(data.grade) !== psa.grade) {
+      clearTimeout(stageTimer);
+      setItem(index, 'hold', '保留', 'ALTの鑑定番号またはPSAグレードが一致しません。');
+      processNext(index + 1);
+      return;
+    }
+    if (!data.ok || !Array.isArray(data.sales) || data.sales.length < 2) {
+      clearTimeout(stageTimer);
+      setItem(index, 'hold', '保留', data.reason || '同一条件の成約2件を確認できません。価格は記入していません。');
+      processNext(index + 1);
+      return;
+    }
+
+    activeStage = 'sheet-write';
+    setItem(index, 'running', 'シートへ記入中…',
+      data.sales[0].date + ' $' + data.sales[0].price + ' / ' +
+      data.sales[1].date + ' $' + data.sales[1].price);
+    armStageTimeout(index, 'sheet-write', 'シート記入でApps Scriptから応答がありません。');
+
+    google.script.run
+      .withSuccessHandler(function(result) {
+        if (!busy || activeIndex !== index || activeStage !== 'sheet-write') return;
+        clearTimeout(stageTimer);
+        setItem(index, 'done', '反映済み',
+          result.sheet + ' ' + result.row + '行目 / ' +
+          result.name + ' / ' + result.grade + ' / 採用 $' + result.adopted);
+        processNext(index + 1);
+      })
+      .withFailureHandler(function(error) {
+        if (!busy || activeIndex !== index || activeStage !== 'sheet-write') return;
+        clearTimeout(stageTimer);
+        setItem(index, 'hold', '保留', 'シート記入: ' + errorText(error));
+        processNext(index + 1);
+      })
+      .writePricedCard({
+        cert: psa.cert,
+        psa: psa,
+        targetSheet: targetSheetName,
+        altCert: data.cert,
+        altGrade: data.grade,
+        altName: data.title || '',
+        altUrl: data.url || '',
+        sales: data.sales,
+        matchConfirmed: true
+      });
+  }
+
+  function isCanonicalPsaUrl(value, cert) {
+    try {
+      var url = new URL(value);
+      return url.protocol === 'https:' &&
+        url.hostname === 'www.psacard.com' &&
+        url.pathname.toLowerCase() === '/cert/' + cert + '/psa';
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function onMessage(event) {
+    var data = event.data;
+    if (!busy || !popupWindow || event.source !== popupWindow || !data) return;
+    if (String(data.nonce || '') !== activeNonce || activeIndex < 0) return;
+
+    if (data.type === 'PSA_CERT_RESULT') {
+      handlePsaResult(event, data);
+    } else if (data.type === 'PSA_ALT_BATCH_RESULT') {
+      handleAltResult(event, data);
+    }
+  }
+
+  function finishBatch(message) {
+    clearTimeout(stageTimer);
+    busy = false;
+    activeIndex = -1;
+    activeStage = '';
+    activeNonce = '';
+    $('processButton').disabled = false;
+    $('addButton').disabled = false;
+    $('clearButton').disabled = false;
+    if (popupWindow && !popupWindow.closed) popupWindow.close();
+    popupWindow = null;
+    renderQueue();
+    var done = queue.filter(function(item) { return item.state === 'done'; }).length;
+    var held = queue.filter(function(item) { return item.state === 'hold'; }).length;
+    setStatus(message + '\n反映 ' + done + '件 / 保留 ' + held + '件。保留理由は各番号の下に表示しています。',
+      held ? '' : 'success');
+    $('cert').focus();
+  }
+
+  function errorText(error) {
+    return error && error.message ? error.message : String(error || '不明なエラー');
+  }
+
+  $('addButton').addEventListener('click', addCert);
+  $('processButton').addEventListener('click', startBatch);
+  $('clearButton').addEventListener('click', function() {
+    if (busy) return;
+    queue = [];
+    renderQueue();
+    setStatus('リストをクリアしました。');
+    $('cert').focus();
   });
-  $('cert').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();clearTimeout(autoAddTimer);addCert();}});
-  init();
+  $('cert').addEventListener('input', onScannerInput);
+  $('cert').addEventListener('keydown', function(event) {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      clearTimeout(autoAddTimer);
+      addCert();
+    }
+  });
+  window.addEventListener('message', onMessage);
+
+  $('targetDate').value = [
+    new Date().getFullYear(),
+    String(new Date().getMonth() + 1).padStart(2, '0'),
+    String(new Date().getDate()).padStart(2, '0')
+  ].join('-');
+  $('cert').focus();
+  setStatus('準備完了です。バーコードを読むと自動でリストに追加されます。');
+})();
 </script>
 </body>
 </html>
