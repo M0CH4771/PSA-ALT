@@ -5,7 +5,7 @@
 // @description  Reads PSA certification pages and relays results to the PSA-ALT batch app, including when PSA severs window.opener.
 // @match        https://www.psacard.com/cert/*
 // @match        https://script.google.com/macros/s/*/exec*
-// @match        https://*.script.googleusercontent.com/macros/*
+// @match        https://*.googleusercontent.com/macros/*
 // @run-at       document-idle
 // @grant        GM_setValue
 // @grant        GM_addValueChangeListener
@@ -15,7 +15,7 @@
 
   const RESULT_KEY = 'PSA_ALT_BATCH_RESULT';
 
-  if (/script\.googleusercontent\.com$/i.test(location.hostname)) {
+  if (/script.*\.googleusercontent\.com$/i.test(location.hostname)) {
     GM_addValueChangeListener(RESULT_KEY, (_key, _oldValue, entry) => {
       if (!entry || !entry.message) return;
       window.postMessage(entry.message, location.origin);
