@@ -104,6 +104,8 @@
   var targetSheetName = '';
   var busy = false;
   var autoAddTimer = null;
+  var scannerResetTimer = null;
+  var rejectScannerUntilQuiet = false;
   var stageTimer = null;
 
   var $ = function(id) { return document.getElementById(id); };
@@ -218,14 +220,31 @@
         input.setSelectionRange(nextCaret, nextCaret);
       }
     }
+
     clearTimeout(autoAddTimer);
+    if (rejectScannerUntilQuiet) {
+      input.value = '';
+      clearTimeout(scannerResetTimer);
+      scannerResetTimer = setTimeout(function() {
+        rejectScannerUntilQuiet = false;
+      }, 200);
+      return;
+    }
+
+    if (input.value.length > 12 || digits(input.value).length > 12) {
+      input.value = '';
+      rejectScannerUntilQuiet = true;
+      scannerResetTimer = setTimeout(function() {
+        rejectScannerUntilQuiet = false;
+      }, 200);
+      setStatus('13桁以上の入力を読み飛ばしました。バーコードをもう一度読み取ってください。', 'error');
+      return;
+    }
+
     autoAddTimer = setTimeout(function() {
-      var lines = $('cert').value.split(/\r?\n/).map(function(line) { return line.trim(); }).filter(Boolean);
-      if (lines.length && lines.every(function(line) {
-        var count = digits(line).length;
-        return /^\d{6,12}$/.test(digits(line)) || count > 12;
-      })) addCert();
-    }, 1200);
+      var cert = digits($('cert').value);
+      if (/^\d{6,12}$/.test(cert)) addCert();
+    }, 600);
   }
 
   function setItem(index, state, status, detail) {
