@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         PSA-ALT Cert Search and Sales Copier
 // @namespace    M0CH4771.PSA-ALT
-// @version      3.6.0
-// @description  Navigates ALT search by the PSA card title, selects a matching item, and returns confirmed sales to the batch app.
+// @version      3.7.0
+// @description  Navigates ALT search by the PSA card title, verifies grade from the matched item title, and returns confirmed sales to the batch app.
 // @match        https://alt.xyz/browse*
 // @match        https://alt.xyz/itm/*/research*
 // @match        https://alt.xyz/itm/*/external*
@@ -77,7 +77,7 @@
       const path=url.pathname;
       const previous=byPath.get(path);
       if(!previous || String(link.innerText||'').length>String(previous.link.innerText||'').length) {
-        byPath.set(path,{link,title:String(link.innerText||imageText||'').trim(),path});
+        byPath.set(path,{link,title:String(link.innerText||link.getAttribute('aria-label')||link.title||imageText||'').trim(),path});
       }
     }
     return [...byPath.values()];
@@ -255,15 +255,11 @@
     runningFor=key;
     say(`ALTカード: ${ctx.altTitle||'鑑定番号検索結果'}\nPSA ${ctx.grade} の履歴を準備しています…`);
 
-    let gradeButton=await waitFor(currentGradeButton);
-    if(!gradeButton) { report(ctx,false,'ALTのPSAグレード欄を確認できません。'); return; }
-    if(norm(gradeButton.innerText)!==norm(ctx.grade)) {
-      gradeButton.click();
-      const menuItem=await waitFor(()=>[...document.querySelectorAll('[role="menuitem"]')].find(el=>norm(el.innerText)===norm(ctx.grade)));
-      if(!menuItem) { report(ctx,false,`${ctx.grade}の選択肢がALTにありません。`); return; }
-      menuItem.click();
-      gradeButton=await waitFor(()=>{ const el=currentGradeButton(); return el&&norm(el.innerText)===norm(ctx.grade)?el:null; });
-      if(!gradeButton) { report(ctx,false,'ALTの表示グレードが切り替わりませんでした。'); return; }
+    const selectedTitle=norm(ctx.altTitle||'').replace(/\s+/g,'');
+    const expectedGrade=norm(ctx.grade||'').replace(/\s+/g,'');
+    if(!selectedTitle.includes(expectedGrade)) {
+      report(ctx,false, 'ALT商品名からPSAグレードを確認できません。候補がPSA ' + ctx.grade + 'か確認してください。');
+      return;
     }
 
     const opened=await waitFor(()=>{
@@ -287,7 +283,7 @@
       ...rows.slice(0,2).map(x=>[x.date,x.price.toFixed(2),x.site,x.href].join('\t'))
     ].join('\n');
     b.textContent='条件を確認して2件コピー';
-    say(`ALT検索とグレード設定が完了しました。\n候補: ${ctx.altTitle||document.querySelector('h1')?.innerText}\nグレード: ${ctx.grade}\n最新: ${rows[0].date} $${rows[0].price} (${rows[0].method})\n前回: ${rows[1].date} $${rows[1].price} (${rows[1].method})\nカードの版・言語・番号がPSA公式と一致することを確認してから、右下のボタンでコピーしてください。`);
+    say(`ALTの商品タイトルとグレード照合が完了しました。\n候補: ${ctx.altTitle||document.querySelector('h1')?.innerText}\nグレード: ${ctx.grade}\n最新: ${rows[0].date} $${rows[0].price} (${rows[0].method})\n前回: ${rows[1].date} $${rows[1].price} (${rows[1].method})\nカードの版・言語・番号がPSA公式と一致することを確認してから、右下のボタンでコピーしてください。`);
   }
 
   async function copy(text) {
