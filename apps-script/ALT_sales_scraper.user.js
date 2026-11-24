@@ -1,7 +1,9 @@
 // ==UserScript==
 // @name         PSA-ALT Cert Search and Sales Copier
 // @namespace    M0CH4771.PSA-ALT
-// @version      3.9.0
+// @version      3.9.3
+// @updateURL    https://raw.githubusercontent.com/M0CH4771/PSA-ALT/main/apps-script/ALT_sales_scraper.user.js
+// @downloadURL  https://raw.githubusercontent.com/M0CH4771/PSA-ALT/main/apps-script/ALT_sales_scraper.user.js
 // @description  Navigates ALT search by the PSA card title, verifies grade from the matched item title, and returns confirmed sales to the batch app.
 // @match        https://alt.xyz/browse*
 // @match        https://alt.xyz/itm/*/research*
