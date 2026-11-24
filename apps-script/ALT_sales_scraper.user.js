@@ -103,8 +103,8 @@
   async function openSingleCertCandidate() {
     const ctx=readContext();
     if (!ctx || !/^\/browse\/?$/.test(location.pathname) || ctx.route!=='browse') return;
-    if (runningFor===\`browse:\${ctx.cert}\`) return;
-    runningFor=\`browse:\${ctx.cert}\`;
+    if (runningFor==='browse:'+ctx.cert) return;
+    runningFor='browse:'+ctx.cert;
 
     const searchInput=await waitFor(browseSearchInput,10000);
     if(!searchInput) { report(ctx,false,'ALTの検索欄が見つからず、鑑定番号を検索できませんでした。'); return; }
