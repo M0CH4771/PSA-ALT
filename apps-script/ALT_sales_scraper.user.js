@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PSA-ALT Cert Search and Sales Copier
 // @namespace    M0CH4771.PSA-ALT
-// @version      3.7.0
+// @version      3.8.0
 // @description  Navigates ALT search by the PSA card title, verifies grade from the matched item title, and returns confirmed sales to the batch app.
 // @match        https://alt.xyz/browse*
 // @match        https://alt.xyz/itm/*/research*
@@ -211,11 +211,30 @@
     return false;
   }
   function transactionsRoot() {
-    const h=[...document.querySelectorAll('h1,h2,h3,h4,[role="heading"]')].find(x=>(x.innerText||'').trim().toLowerCase()==='market transactions');
-    if(!h) return null;
-    let n=h;
-    for(let i=0;n&&i<9;i++,n=n.parentElement) {
-      if(/market transactions/i.test(n.innerText||'') && n.querySelectorAll('a[href*="/itm/"],a[href*="ebay.com"]').length) return n;
+    const hasSaleLinks = el => el.querySelectorAll('a[href*="/itm/"],a[href*="/sold/"],a[href*="ebay.com/itm/"]').length > 0;
+    const titlePattern = /market\\s+transactions|sales\\s+history/i;
+    const isVisible = el => {
+      const style=getComputedStyle(el);
+      return style.display!=='none' && style.visibility!=='hidden' && el.getClientRects().length>0;
+    };
+
+    // ALT renders "Market transactions" inside a right-side MUI drawer. Its
+    // exact parent depth can change, so find the nearest visible drawer/dialog
+    // containing both the title and sale links first.
+    const overlays=[...document.querySelectorAll('[role="dialog"],[aria-modal="true"],.MuiDrawer-paper,.MuiDrawer-root')];
+    for(const overlay of overlays) {
+      if(!isVisible(overlay) || !titlePattern.test(overlay.innerText||'')) continue;
+      if(hasSaleLinks(overlay)) return overlay;
+    }
+
+    const headings=[...document.querySelectorAll('h1,h2,h3,h4,[role="heading"]')]
+      .filter(el=>titlePattern.test((el.innerText||'').replace(/\\s+/g,' ').trim()));
+    for(const heading of headings) {
+      let node=heading;
+      for(let depth=0;node&&depth<14;depth++,node=node.parentElement) {
+        if(!titlePattern.test(node.innerText||'')) continue;
+        if(hasSaleLinks(node)) return node;
+      }
     }
     return null;
   }
