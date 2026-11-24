@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PSA-ALT Cert Search and Sales Copier
 // @namespace    M0CH4771.PSA-ALT
-// @version      3.16.0
+// @version      3.17.0
 // @updateURL    https://raw.githubusercontent.com/M0CH4771/PSA-ALT/main/apps-script/ALT_sales_scraper.user.js
 // @downloadURL  https://raw.githubusercontent.com/M0CH4771/PSA-ALT/main/apps-script/ALT_sales_scraper.user.js
 // @description  Searches ALT by PSA card name, confirms exact card number and grade, and copies only verified sales.
@@ -172,7 +172,8 @@
       const key=item.path||'text:'+compact(label.replace(/#\s*0+(?=\d)/g,'#'));
       if(!results.has(key)) results.set(key,{...item,key,strict:identityMatches(item.title,ctx)});
     }
-    return [...results.values()].sort((a,b)=>Number(b.strict)-Number(a.strict)||Number(gradeRe.test(b.title))-Number(gradeRe.test(a.title))||Number(!!b.path)-Number(!!a.path));
+    const rank=item=>/\/research\/?$/i.test(item.path)?3:/\/external\/?$/i.test(item.path)?2:!item.path?1:0;
+    return [...results.values()].sort((a,b)=>Number(b.strict)-Number(a.strict)||rank(b)-rank(a)||Number(gradeRe.test(b.title))-Number(gradeRe.test(a.title)));
   }
 
   function candidateKey(item) {
@@ -208,8 +209,8 @@
     ctx.lastFailure=reason;
     if(!canRetry(ctx)) { report(ctx,false,reason); return; }
     const remaining=(ctx.candidates||[]).filter(item=>!(ctx.attempted||[]).includes(candidateKey(item)));
-    const next=remaining.find(item=>item.path);
-    if(next) { openCandidate(ctx,next); return; }
+    const next=remaining[0];
+    if(next?.path) { openCandidate(ctx,next); return; }
     if(!remaining.length) { report(ctx,false,reason); return; }
     // Text rows need a fresh DOM element after navigation.
     ctx.route='name-search'; delete ctx.researchPath; saveContext(ctx);
@@ -358,46 +359,97 @@
     for(let i=0;node&&i<maxDepth;i++,node=node.parentElement) if(node.contains(b)) return node;
     return null;
   }
-  async function openTransactions(timeoutMs=12000) {
-    const deadline=Date.now()+timeoutMs;
-    while(Date.now()<deadline) {
-      const headings=[...document.querySelectorAll('h1,h2,h3,h4,[role="heading"]')]
-        .filter(el=>/recent transactions/i.test(norm(el.innerText||el.getAttribute('aria-label'))));
-      const controls=viewAllControls(document).filter(visible);
-      let best=null;
-      for(const heading of headings) for(const control of controls) {
-        const common=closestCommonAncestor(heading,control);
-        if(!common || !/recent transactions/i.test(norm(common.innerText||''))) continue;
-        const distance=distanceTo(common,heading)+distanceTo(common,control);
-        if(!best || distance<best.distance) best={control,distance};
-      }
-      if(marketTitleVisible()) return true;
-      if(best) { best.control.click(); return true; }
-      await sleep(300);
+  function actualDrawer(label) {
+    const wanted=norm(label);
+    const drawers=[...document.querySelectorAll('.MuiDrawer-paper,[role="dialog"],[aria-modal="true"],aside')].filter(visible);
+    return drawers.find(root=>[...root.querySelectorAll('h1,h2,h3,h4,[role="heading"],span,p,div')].some(el=>visible(el)&&norm(el.innerText||el.textContent)===wanted))||null;
+  }
+  function recentViewAll() {
+    const heading=recentTransactionsHeading();
+    if(!heading||!visible(heading)) return null;
+    // Never rank every View all on the page: Listings can be nearer in the DOM.
+    for(let node=heading.parentElement;node&&node!==document.body;node=node.parentElement) {
+      if(/^\s*listings\s*$/im.test(node.innerText||'')) break;
+      const controls=viewAllControls(node).filter(visible);
+      if(controls.length===1) return controls[0];
+      if(controls.length>1) break;
     }
-    return false;
+    return null;
+  }
+  function closeListingsDrawer() {
+    const drawer=actualDrawer('Listings');
+    if(!drawer) return false;
+    const close=[...drawer.querySelectorAll('button')].find(el=>visible(el)&&(el.querySelector('[data-testid="CloseIcon"]')||/close/i.test(el.getAttribute('aria-label')||'')));
+    if(!close) return false;
+    close.click(); return true;
+  }
+  async function openTransactions(timeoutMs=10000) {
+    const deadline=Date.now()+timeoutMs;
+    let clicked=false, closedWrong=false;
+    while(Date.now()<deadline) {
+      if(transactionsRoot()) return true;
+      if(actualDrawer('Listings')) {
+        if(closedWrong||!closeListingsDrawer()) return false;
+        closedWrong=true; clicked=false;
+        if(!await waitFor(()=>!actualDrawer('Listings'),3000)) return false;
+        continue;
+      }
+      if(!clicked) {
+        const control=recentViewAll();
+        if(control) { control.click(); clicked=true; }
+      }
+      await sleep(250);
+    }
+    return !!transactionsRoot();
   }
   function transactionsRoot() {
-    // ALT may render the drawer title as plain text rather than a heading.
-    const isTitle=el=>visible(el)&&/^market\s+transactions$/i.test(norm(el.innerText||el.textContent||el.getAttribute('aria-label')));
-    const titles=[...document.querySelectorAll('h1,h2,h3,h4,[role="heading"],span,p,div')].filter(isTitle);
+    // ALT's real Market transactions uses MuiDrawer-paper, separate from main.
+    const drawer=actualDrawer('Market transactions');
+    if(drawer) return drawer;
+    const titles=[...document.querySelectorAll('h1,h2,h3,h4,[role="heading"],span,p,div')].filter(el=>visible(el)&&/^market\s+transactions$/i.test(norm(el.innerText||el.textContent||el.getAttribute('aria-label'))));
     const leaves=titles.filter(el=>!titles.some(other=>other!==el&&el.contains(other)));
-    const overlays=[...document.querySelectorAll('[role="dialog"],[aria-modal="true"],.MuiDrawer-paper,.MuiDrawer-root,aside')].filter(visible);
     for(const heading of leaves) {
-      const candidates=overlays.filter(el=>el.contains(heading)&&!/^\s*listings\s*$/im.test(el.innerText||''));
-      if(candidates.length) return candidates.sort((a,b)=>distanceTo(a,heading)-distanceTo(b,heading))[0];
-      let node=heading.parentElement;
-      for(let depth=0;node&&depth<14;depth++,node=node.parentElement) {
-        if(node===document.body||node===document.documentElement||node.matches('main')) break;
+      for(let node=heading.parentElement;node&&node!==document.body&&node!==document.documentElement&&!node.matches('main');node=node.parentElement) {
         if(!visible(node)||/^\s*listings\s*$/im.test(node.innerText||'')) continue;
-        // Don't require anchors: some versions use clickable divs for rows.
         if(parseRows(node).length) return node;
       }
     }
     return null;
   }
-  function marketTitleVisible() {
-    return [...document.querySelectorAll('h1,h2,h3,h4,[role="heading"],span,p,div')].some(el=>visible(el)&&/^market\s+transactions$/i.test(norm(el.innerText||el.textContent||el.getAttribute('aria-label'))));
+  function marketTitleVisible() { return !!actualDrawer('Market transactions')||!!transactionsRoot(); }
+  function drawerPopulation(root) {
+    const labels=[...root.querySelectorAll('span,p,h1,h2,h3,h4,[role="heading"]')].filter(el=>visible(el)&&/^(PSA|CGC|BGS|SGC|TAG)\s+population$/i.test(norm(el.innerText||el.textContent)));
+    const groups=[];
+    for(const label of labels) {
+      const company=norm(label.innerText||label.textContent).split(' ')[0];
+      let node=label.parentElement;
+      for(let depth=0;node&&depth<5;depth++,node=node.parentElement) {
+        if(labels.some(other=>other!==label&&node.contains(other))) break;
+        const buttons=[...node.querySelectorAll('button,[role="button"]')].filter(visible);
+        if(buttons.length) {
+          for(const button of buttons) {
+            const grade=(button.innerText||'').trim().split(/\s+/)[0];
+            const canonical=canonicalGrade(company+' '+grade);
+            if(!canonical) continue;
+            const style=getComputedStyle(button);
+            // ALT marks the selected population button by its bottom border;
+            // the page header's PSA grade does not change with this drawer.
+            const selected=button.getAttribute('aria-selected')==='true'||button.getAttribute('aria-pressed')==='true'||parseFloat(style.borderBottomWidth)>0;
+            groups.push({button,grade:canonical,selected});
+          }
+          break;
+        }
+      }
+    }
+    return groups;
+  }
+  function drawerGrade(root) {
+    const controls=drawerPopulation(root);
+    const selected=controls.filter(x=>x.selected);
+    return selected.length===1?selected[0].grade:'';
+  }
+  function saleSignature(rows) {
+    return rows.slice(0,2).map(x=>[x.date,x.price,x.href].join('|')).join(';');
   }
   function parseRows(root) {
     const seen=new Set(), out=[];
@@ -426,10 +478,11 @@
       return {date:d,price,method,text};
     };
     const candidates=[...root.querySelectorAll('a[href],[role="link"],li,article,button,div')];
-    const valid=candidates.filter(el=>el.getClientRects().length&&rowData(el));
-    // Use the innermost element that contains a complete sale record to avoid
-    // counting the drawer and its row wrappers as separate transactions.
-    const rows=valid.filter(el=>![...el.querySelectorAll('a[href],[role="link"],li,article,button,div')].some(child=>rowData(child)));
+    // The actual ALT market drawer exposes each transaction as one link.
+    // Parse the entire link so a nested child cannot hide Listing Price/Unsold.
+    const linked=candidates.filter(el=>el.matches('a[href]')&&visible(el)&&rowData(el));
+    const unlinked=candidates.filter(el=>!el.matches('a[href]')&&!el.closest('a[href]')&&!el.querySelector('a[href]')&&visible(el)&&rowData(el));
+    const rows=[...linked,...unlinked.filter(el=>!unlinked.some(child=>child!==el&&el.contains(child)))];
     for(const el of rows) {
       const parsed=rowData(el);
       if(!parsed) continue;
@@ -481,47 +534,84 @@
       retryCandidate(ctx,'ALT商品ページでカード番号を確認できません。誤入力防止のため保留しました。');
       return;
     }
-    phase('カード一致。'+ctx.grade+' のグレードを照合中…');
-    const gradeState=await waitFor(displayedGrade);
-    const gradeButton=currentGradeButton();
-    if(!gradeButton && gradeState!==canonicalGrade(ctx.grade)) { retryCandidate(ctx,'ALT商品詳細のPSAグレードが一致しません。'); return; }
-    if(gradeButton && canonicalGrade(gradeButton.innerText||gradeButton.getAttribute('aria-label'))!==canonicalGrade(ctx.grade)) {
-      phase('ALTで'+ctx.grade+' を選択中…');
-      gradeButton.click();
-      const menuItem=await waitFor(()=>[...document.querySelectorAll('[role="menuitem"],button,[role="option"]')].find(el=>visible(el)&&canonicalGrade(el.innerText||el.getAttribute('aria-label'))===canonicalGrade(ctx.grade)));
-      if(!menuItem) { retryCandidate(ctx,ctx.grade+'の選択肢がALTにありません。'); return; }
-      menuItem.click();
-      const selected=await waitFor(()=>{ const el=currentGradeButton(); return el&&canonicalGrade(el.innerText||el.getAttribute('aria-label'))===canonicalGrade(ctx.grade)?el:null; });
-      if(!selected) { retryCandidate(ctx,'ALTでPSA '+ctx.grade+'を選択できませんでした。'); return; }
+    const initialDrawer=transactionsRoot();
+    // An already-open Market transactions drawer has its own grade selector.
+    // Do not wait for or operate the page's grade control behind that modal.
+    if(initialDrawer&&drawerPopulation(initialDrawer).length) {
+      phase('Market transactionsは開いています。パネルのグレードを使用します…');
+    } else {
+      phase('カード一致。'+ctx.grade+' のグレードを照合中…');
+      const gradeState=await waitFor(displayedGrade);
+      const gradeButton=currentGradeButton();
+      if(!gradeButton && gradeState!==canonicalGrade(ctx.grade)) { retryCandidate(ctx,'ALT商品詳細のPSAグレードが一致しません。'); return; }
+      if(gradeButton && canonicalGrade(gradeButton.innerText||gradeButton.getAttribute('aria-label'))!==canonicalGrade(ctx.grade)) {
+        phase('ALTで'+ctx.grade+' を選択中…');
+        gradeButton.click();
+        const menuItem=await waitFor(()=>[...document.querySelectorAll('[role="menuitem"],button,[role="option"]')].find(el=>visible(el)&&canonicalGrade(el.innerText||el.getAttribute('aria-label'))===canonicalGrade(ctx.grade)));
+        if(!menuItem) { retryCandidate(ctx,ctx.grade+'の選択肢がALTにありません。'); return; }
+        menuItem.click();
+        const selected=await waitFor(()=>{ const el=currentGradeButton(); return el&&canonicalGrade(el.innerText||el.getAttribute('aria-label'))===canonicalGrade(ctx.grade)?el:null; });
+        if(!selected) { retryCandidate(ctx,'ALTでPSA '+ctx.grade+'を選択できませんでした。'); return; }
+      }
+
     }
 
-    phase(marketTitleVisible()?'Market transactionsを検出。成約行を読み込み中…':'カード・グレード一致。Recent transactionsを確認中…');
-    const opened=await waitFor(()=>{
-      if(marketTitleVisible()) return 'already-open';
-      return recentTransactionsHeading()?'ready':null;
-    },25000);
-    if(!opened) { retryCandidate(ctx,'ALTの成約履歴欄が見つかりません。'); return; }
-    if(opened!=='already-open' && !(await openTransactions())) { retryCandidate(ctx,'ALTの「Recent Transactions → VIEW ALL」を見つけられませんでした。'); return; }
-    phase('Market transactionsを検出中…');
-    let root=await waitFor(transactionsRoot,15000);
-    if(!root) { retryCandidate(ctx,marketTitleVisible()?'Market transactionsは表示済みですが、成約行の読み込みを確認できませんでした。':'Market transactionsを開けませんでした。'); return; }
-    let rows=[];
-    phase('Market transactionsを検出。成約2件を読み込み中…');
-    // React can replace the drawer while transactions load. Resolve it again
-    // on every poll, and wait for two records rather than the first row.
-    await waitFor(()=>{
-      const fresh=transactionsRoot();
-      if(fresh) { root=fresh; const before=rows.length; rows=parseRows(root); if(rows.length!==before) phase('成約を読み込み中… '+rows.length+'件取得'); }
-      return rows.length>=2?rows:null;
-    },12000);
-    for(let i=0;rows.length<2&&i<5;i++) {
-      const more=[...root.querySelectorAll('button')].find(x=>(x.innerText||'').trim().toLowerCase()==='show more'&&!x.disabled);
-      if(!more) break;
-      more.click(); await sleep(700); root=transactionsRoot()||root; rows=parseRows(root);
+    phase('成約パネルを確認中…');
+    let root=transactionsRoot();
+    if(!root) {
+      const ready=await waitFor(()=>transactionsRoot()||recentTransactionsHeading()||actualDrawer('Listings'),8000);
+      if(!ready) { retryCandidate(ctx,'ALTの成約履歴欄が見つかりません。'); return; }
+      if(!(await openTransactions())) { retryCandidate(ctx,'Recent Transactions → VIEW ALL からMarket transactionsを開けませんでした。'); return; }
+      root=transactionsRoot();
     }
-    if(rows.length<2) { retryCandidate(ctx,`同一条件の有効成約が${rows.length}件です。2件そろわないため価格を記入しません。`); return; }
+    if(!root) { retryCandidate(ctx,'Market transactionsを開けませんでした。'); return; }
+    phase('Market transactionsは開いています。パネル内の'+ctx.grade+'を確認中…');
+
+    const expectedGrade=canonicalGrade(ctx.grade);
+    let population=drawerPopulation(root);
+    const requiresDrawerGrade=population.length>0||/\b(?:PSA|CGC|BGS)\s+population\b/i.test(root.innerText||'');
+    if(requiresDrawerGrade&&!population.length) {
+      const loaded=await waitFor(()=>{const live=transactionsRoot();if(!live)return null;const controls=drawerPopulation(live);if(!controls.length)return null;root=live;return controls;},4000);
+      population=loaded||[];
+    }
+    let staleSignature='';
+    if(population.length && drawerGrade(root)!==expectedGrade) {
+      const target=population.find(x=>x.grade===expectedGrade);
+      if(!target) { retryCandidate(ctx,'成約パネルに'+ctx.grade+'の選択肢がありません。'); return; }
+      staleSignature=saleSignature(parseRows(root));
+      target.button.click();
+      const selected=await waitFor(()=>{ const live=transactionsRoot(); return live&&drawerGrade(live)===expectedGrade?live:null; },5000);
+      if(!selected) { retryCandidate(ctx,'成約パネル内で'+ctx.grade+'を選択できません。'); return; }
+      root=selected;
+    }
+    let rows=[];
+    phase('成約パネルから'+ctx.grade+'の成約2件を取得中…');
+    const freshRows=()=>{
+      const live=transactionsRoot();
+      if(!live) return null;
+      root=live;
+      const controls=drawerPopulation(root);
+      if((requiresDrawerGrade||controls.length)&&drawerGrade(root)!==expectedGrade) return null;
+      const parsed=parseRows(root);
+      if(staleSignature&&saleSignature(parsed)===staleSignature) return null;
+      if(parsed.length!==rows.length) phase('成約を読み込み中… '+parsed.length+'件取得');
+      rows=parsed;
+      return rows.length>=2?rows:null;
+    };
+    // Read immediately if the panel is already populated, rather than waiting
+    // for a new open event. Re-read after any React drawer replacement.
+    await waitFor(freshRows,8000);
+    for(let i=0;rows.length<2&&i<5;i++) {
+      const more=[...root.querySelectorAll('button')].find(x=>norm(x.innerText)==='show more'&&!x.disabled&&visible(x));
+      if(!more) break;
+      more.click(); await sleep(700); await waitFor(freshRows,2500);
+    }
+    if(rows.length<2) { retryCandidate(ctx,'Market transactionsは開いていますが、'+ctx.grade+'の有効成約が'+rows.length+'件です。'); return; }
     phase('成約2件取得。PSAグレードを最終確認中…');
-    if(displayedGrade()!==canonicalGrade(ctx.grade)) { retryCandidate(ctx,'成約取得後のPSAグレードが一致しません。'); return; }
+    const finalRoot=transactionsRoot();
+    if(!finalRoot) { retryCandidate(ctx,'成約パネルが閉じられました。'); return; }
+    const finalPopulation=drawerPopulation(finalRoot);
+    if((requiresDrawerGrade||finalPopulation.length)?drawerGrade(finalRoot)!==expectedGrade:displayedGrade()!==expectedGrade) { retryCandidate(ctx,'成約取得後のPSAグレードが一致しません。'); return; }
     ctx.altTitle=titleText;
     if(ctx.batch) { report(ctx,true,'',rows.slice(0,2)); sessionStorage.removeItem(STORAGE_KEY); b.hidden=true; return; }
     b.dataset.payload=[
