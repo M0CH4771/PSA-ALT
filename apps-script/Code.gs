@@ -75,6 +75,12 @@ function ensureSummarySheet(dateInput) {
     imageUrlHeader.setValue('PSA画像URL');
   }
 
+  // Show dollar prices clearly in D (price), F (previous sale), and H (adopted).
+  var priceRows = Math.max(1, sheet.getMaxRows() - 1);
+  [PSA_ALT_COLUMNS.price, PSA_ALT_COLUMNS.previous, PSA_ALT_COLUMNS.adopted].forEach(function(column) {
+    sheet.getRange(2, column, priceRows, 1).setNumberFormat('$#,##0.##');
+  });
+
   return { sheet: sheetName };
 }
 
