@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PSA-ALT Cert Search and Sales Copier
 // @namespace    M0CH4771.PSA-ALT
-// @version      3.9.5
+// @version      3.10.0
 // @updateURL    https://raw.githubusercontent.com/M0CH4771/PSA-ALT/main/apps-script/ALT_sales_scraper.user.js
 // @downloadURL  https://raw.githubusercontent.com/M0CH4771/PSA-ALT/main/apps-script/ALT_sales_scraper.user.js
 // @description  Searches ALT by PSA card name, confirms exact card number and grade, and copies only verified sales.
@@ -47,14 +47,14 @@
   function captureSearchRequest() {
     if (!/^\/browse\/?$/.test(location.pathname)) return;
     const params = new URLSearchParams(location.search);
-    const cert = String(params.get('query')||'').replace(/\D/g,'');
+    const cert = String(params.get('psaCert')||params.get('query')||'').trim();
     const grade = String(params.get('psaGrade')||'').trim();
     if (!/^\d{6,12}$/.test(cert) || !/^\d+(?:\.5)?$/.test(grade)) return;
     const nonce=String(params.get('psaNonce')||'');
     const batch=params.get('psaBatch')==='1' && /^[\w-]{10,100}$/.test(nonce);
     const ctx = { cert, grade:`PSA ${Number(grade)}`, cardName:params.get('psaName')||'', subject:params.get('psaSubject')||'', nonce, batch, createdAt:Date.now(), route:'browse' };
     saveContext(ctx);
-    say(`鑑定番号 ${cert} でALT検索中です。候補カードを確認しています…`);
+    say(`ALT検索準備: ${ctx.cardName||ctx.subject}`);
   }
 
   b.hidden=/^\/browse\/?$/.test(location.pathname);
@@ -73,112 +73,126 @@
     const stop=new Set((prefix.toLowerCase().match(/[\p{L}\p{N}]+/gu)||[]));
     return tail.split(/\s+/).filter(word=>!stop.has(word.toLowerCase().replace(/[^\p{L}\p{N}]+/gu,''))).join(' ').trim();
   }
+  function visible(el) {
+    return !!el && el.getClientRects().length>0 && getComputedStyle(el).visibility!=='hidden' && getComputedStyle(el).display!=='none';
+  }
+  function identityMatches(raw,ctx) {
+    const title=String(ctx.cardName||'');
+    const subject=coreSubject(title)||String(ctx.subject||'').trim();
+    const number=(title.match(/#\s*0*(\d{1,4})\b/i)||[])[1];
+    const year=(title.match(/\b(?:19|20)\d{2}\b/)||[])[0];
+    const language=(title.match(/\b(japanese|korean|english|chinese|mandarin|cantonese|thai|indonesian|german|french|italian|spanish)\b/i)||[])[1];
+    if(!subject||!number||!year) return false;
+    if(!new RegExp('#\\s*0*'+number+'\\b','i').test(raw)||!raw.includes(year)) return false;
+    if(language&&!new RegExp('\\b'+language+'\\b','i').test(raw)) return false;
+    const words=value=>norm(value).match(/[\p{L}\p{N}]+/gu)||[];
+    const actual=new Set(words(raw));
+    if(!words(subject).every(w=>actual.has(w))) return false;
+    const edition=/\b(?:1st|first)\s+edition\b/i;
+    const unlimited=/\bunlimited\b/i;
+    if(edition.test(title)!==edition.test(raw)||unlimited.test(title)!==unlimited.test(raw)) return false;
+    const prefix=title.split(/#\s*\d/)[0];
+    const setWords=words(prefix).filter(w=>! /^(pokemon|japanese|english|korean|chinese|tcg|card|and|sword|shield|\d{4}|sv\d+[a-z]?|s\d+[a-z]?)$/.test(w));
+    return setWords.every(w=>actual.has(w));
+  }
+
   function candidateItems(ctx) {
-    const subject=coreSubject(ctx.cardName||ctx.subject)||String(ctx.subject||ctx.cardName||'').trim();
-    const subjectTerms=norm(subject).replace(/[^\p{L}\p{N}#']+/gu,' ').split(/\s+/).filter(x=>x.length>1&&!/^(pokemon|japanese|english|card|psa|gem|mt|super|rare|ultra|full|art)$/i.test(x));
-    const number=(ctx.cardName.match(/#\s*0*(\d{1,4})/i)||[])[1]||'';
-    const language=(ctx.cardName.match(/\b(japanese|korean|english|chinese|mandarin|cantonese|thai|indonesian|german|french|italian|spanish)\b/i)||[])[1]||'';
-    const byPath=new Map();
-    for(const link of document.querySelectorAll('a[href*="/itm/"]')) {
-      let url;
-      try { url=new URL(link.href); } catch (_) { continue; }
-      if(!/^\/itm\/[0-9a-f-]+\/external\/?$/i.test(url.pathname)) continue;
-      const imageText=[...link.querySelectorAll('img[alt]')].map(img=>img.alt||'').join(' ');
-      const raw=[link.innerText,link.getAttribute('aria-label'),link.title,imageText].join(' ');
-      const compactText=compact(raw);
-      if(subjectTerms.length && !subjectTerms.every(term=>compactText.includes(compact(term)))) continue;
-      const numbers=[...raw.matchAll(/#\s*0*(\d{1,4})\b/g)].map(m=>String(Number(m[1])));
-      if(number && numbers.length && !numbers.includes(String(Number(number)))) continue;
-      const languages=[...raw.matchAll(/\b(japanese|korean|english|chinese|mandarin|cantonese|thai|indonesian|german|french|italian|spanish)\b/ig)].map(m=>m[1].toLowerCase());
-      if(language && languages.length && !languages.includes(language.toLowerCase())) continue;
-      const path=url.pathname;
-      const score=(number && numbers.includes(String(Number(number)))?4:0)+(language && languages.includes(language.toLowerCase())?2:0);
-      const previous=byPath.get(path);
-      if(!previous || score>previous.score || String(link.innerText||'').length>String(previous.link.innerText||'').length) {
-        byPath.set(path,{link,title:String(link.innerText||link.getAttribute('aria-label')||link.title||imageText||'').trim(),path,score,numberVerified:!!(number&&numbers.includes(String(Number(number))))});
+    const found=new Map();
+    for(const el of document.querySelectorAll('a[href*="/itm/"],button,[role="button"],[role="row"],[role="option"],[tabindex],div,tr')) {
+      if(!visible(el)||el===b||el.closest('header,nav,aside,footer')) continue;
+      const raw=[el.innerText,el.getAttribute('aria-label'),el.title,...[...el.querySelectorAll('img[alt]')].map(img=>img.alt)].filter(Boolean).join(' ').trim();
+      if(!raw||raw.length>500||!identityMatches(raw,ctx)) continue;
+      let path='';
+      const anchor=el.matches('a[href]')?el:el.querySelector('a[href*="/itm/"]');
+      if(anchor) {
+        try {
+          const u=new URL(anchor.href);
+          if(u.origin!==location.origin||!/^\/itm\/[0-9a-f-]+\/(?:external|research)\/?$/i.test(u.pathname)) continue;
+          path=u.pathname;
+        } catch (_) { continue; }
       }
+      if(!path && (!/^(?:19|20)\d{2}\b/.test(String(el.innerText||'').trim()) || (!el.matches('button,[role="button"],[role="row"],[role="option"],[tabindex],tr') && getComputedStyle(el).cursor!=='pointer'))) continue;
+      const key=path?path.replace(/\/(?:external|research)\/?$/,''):norm(raw);
+      const previous=found.get(key);
+      if(!previous||previous.link.contains(el)) found.set(key,{link:el,title:raw,path,numberVerified:true});
     }
-    return [...byPath.values()].sort((a,b)=>b.score-a.score);
+    return [...found.values()].filter((item,_,all)=>!all.some(other=>other!==item && item.link.contains(other.link)));
   }
 
   function browseSearchInput() {
-    return document.querySelector('#universal-search-autocomplete') ||
-      [...document.querySelectorAll('input')].find(el =>
-        /search/i.test((el.getAttribute('aria-label')||'')+' '+(el.placeholder||'')+' '+(el.id||'')));
+    const exact=document.querySelector('#universal-search-autocomplete');
+    if(visible(exact)&&!exact.disabled&&!exact.readOnly) return exact;
+    const inputs=[...document.querySelectorAll('input')].filter(el=>visible(el)&&!el.disabled&&!el.readOnly&&
+      /search\s+by\s+name\s+or\s+cert/i.test([el.placeholder,el.getAttribute('aria-label')].join(' ')));
+    return inputs.length===1?inputs[0]:null;
   }
-
-  async function submitSearch(input, query) {
-    query=String(query||'').trim();
-    if(norm(input.value)!==norm(query)) {
-      const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')?.set;
-      if(setter) setter.call(input,query); else input.value=query;
-      input.dispatchEvent(new Event('input',{bubbles:true}));
-      input.dispatchEvent(new Event('change',{bubbles:true}));
-    }
+  async function submitSearch(input,query) {
     input.focus();
-    const key={key:'Enter',code:'Enter',keyCode:13,which:13,bubbles:true,cancelable:true};
-    input.dispatchEvent(new KeyboardEvent('keydown',key));
-    input.dispatchEvent(new KeyboardEvent('keypress',key));
-    input.dispatchEvent(new KeyboardEvent('keyup',key));
-  }
-
-  async function waitForCandidates(timeoutMs,ctx) {
-    const deadline=Date.now()+timeoutMs;
-    while(Date.now()<deadline) {
-      const candidates=candidateItems(ctx);
-      if(candidates.length) return candidates;
-      if(/couldn't find any results|no results found/i.test(document.body.innerText||'')) return [];
-      await sleep(350);
-    }
-    return [];
+    const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')?.set;
+    if(setter) setter.call(input,query); else input.value=query;
+    input.dispatchEvent(new Event('input',{bubbles:true}));
+    input.dispatchEvent(new Event('change',{bubbles:true}));
+    await sleep(700);
+    const actual=browseSearchInput();
+    if(!actual||norm(actual.value)!==norm(query)) return false;
+    actual.focus();
+    actual.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',code:'Enter',keyCode:13,which:13,bubbles:true,cancelable:true}));
+    return true;
   }
 
   async function openSingleCertCandidate() {
     const ctx=readContext();
-    if (!ctx || !/^\/browse\/?$/.test(location.pathname)) return;
-    const route=ctx.route||'browse';
-    if(!['browse','name-search'].includes(route)) return;
-    const runKey='browse:'+ctx.cert+':'+route;
+    if(!ctx||!/^\/browse\/?$/.test(location.pathname)||!['browse','name-search'].includes(ctx.route)) return;
+    const runKey='browse:'+ctx.nonce+':'+ctx.route;
     if(runningFor===runKey) return;
     runningFor=runKey;
-
-    function navigateSearch(query,message) {
-      ctx.route='name-search';
-      saveContext(ctx);
-      const url=new URL('/browse',location.origin);
-      url.searchParams.set('query',query);
-      say(message);
-      location.assign(url.href);
-    }
-
-    if(route==='browse') {
-      const query=String(ctx.cardName||ctx.subject||'').trim();
-      if(!query) {
-        report(ctx,false,'PSA公式からカード名を取得できないため、ALT検索を開始できません。');
+    const full=String(ctx.cardName||'').trim();
+    const subject=coreSubject(full);
+    const number=(full.match(/#\s*0*(\d{1,4})\b/)||[])[1];
+    const year=(full.match(/\b(?:19|20)\d{2}\b/)||[])[0];
+    if(!subject||!number||!year) { report(ctx,false,'PSAカード名・年・型番を取得できません。'); return; }
+    const query=full.replace(/\b(?:FA|FULL ART)\s*\/\s*/ig,'').replace(/\s+/g,' ').trim();
+    const input=await waitFor(browseSearchInput,15000);
+    if(!input) { report(ctx,false,'ALTの「Search by name or cert #」入力欄が見つかりません。'); return; }
+    if(ctx.route==='browse') {
+      ctx.route='name-search'; ctx.query=query; saveContext(ctx); runningFor='browse:'+ctx.nonce+':name-search';
+      say('ALT検索欄に入力: '+query);
+      if(!await submitSearch(input,query)) {
+        report(ctx,false,'ALT検索欄にカード名が反映されませんでした。'); return;
+      }
+      await sleep(1000);
+      // Some ALT versions do not commit synthetic Enter. Use the normal
+      // browse URL once, then verify both the visible field and URL.
+      if(norm(new URLSearchParams(location.search).get('query'))!==norm(query)) {
+        const url=new URL('/browse',location.origin);
+        url.searchParams.set('query',query);
+        location.assign(url.href);
         return;
       }
-      navigateSearch(query,'PSA公式のカード名でALT検索しています…鑑定番号では検索しません。');
-      return;
     }
-
-    const candidates=await waitForCandidates(30000,ctx);
-    if(candidates.length) {
-      const bestScore=candidates[0].score;
-      const best=candidates.filter(item=>item.score===bestScore);
-      if(best.length!==1) {
-        report(ctx,false,'カード名検索で候補が複数あります。誤ったカードを選ばないよう保留しました。候補を手動で確認してください。');
-        return;
-      }
-      const candidate=best[0];
-      ctx.altTitle=candidate.title||candidate.path;
-      ctx.numberVerified=candidate.numberVerified;
-      ctx.route='opening';
-      saveContext(ctx);
-      say('ALT候補を開き、カード番号とPSAグレードを確認します: '+ctx.altTitle);
-      candidate.link.click();
-      return;
+    const verified=await waitFor(()=>{
+      const el=browseSearchInput();
+      return el&&norm(el.value)===norm(query)&&norm(new URLSearchParams(location.search).get('query'))===norm(query);
+    },12000);
+    if(!verified) { report(ctx,false,'ALTの検索欄と検索URLがカード名に一致しません: '+query); return; }
+    say('ALT検索確認済み: '+query);
+    const deadline=Date.now()+25000;
+    let candidates=[], signature='', stable=0;
+    while(Date.now()<deadline) {
+      const current=candidateItems(ctx);
+      const next=current.map(item=>item.path||norm(item.title)).sort().join('|');
+      stable=next&&next===signature?stable+1:0;
+      signature=next; candidates=current;
+      if(candidates.length&&stable>=3) break;
+      await sleep(400);
     }
-    report(ctx,false,'カード名検索で一致候補が見つかりませんでした。鑑定番号検索へは切り替えず保留しました。カード名をALTで手動確認してください。');
+    if(candidates.length!==1) {
+      report(ctx,false,candidates.length?'条件一致候補が複数あります。':'検索は実行済みですが、カード条件が一致する画像付き商品・文字候補を取得できません。'); return;
+    }
+    const candidate=candidates[0];
+    ctx.altTitle=candidate.title; ctx.numberVerified=true; ctx.route='opening'; saveContext(ctx);
+    say('ALT一致候補を開きます: '+candidate.title);
+    candidate.link.click();
   }
 
   function currentGradeButton() {
@@ -310,7 +324,8 @@
     runningFor=key;
     say(`ALTカード: ${ctx.altTitle||'鑑定番号検索結果'}\nPSA ${ctx.grade} の履歴を準備しています…`);
 
-    const titleText=String(document.querySelector('h1')?.innerText||document.title||ctx.altTitle||'');
+    const titleText=await waitFor(()=>[...document.querySelectorAll('h1,h2,[role="heading"]')].map(el=>String(el.innerText||'')).find(t=>identityMatches(t,ctx)),15000);
+    if(!titleText) { report(ctx,false,'ALTカード詳細でカード名・型番・セット・言語・版を照合できません。'); return; }
     const subject=coreSubject(ctx.cardName||ctx.subject)||String(ctx.subject||ctx.cardName||'').trim();
     const subjectTerms=norm(subject).replace(/[^\p{L}\p{N}#']+/gu,' ').split(/\s+/).filter(x=>x.length>1&&!/^(pokemon|japanese|english|card|psa|gem|mt|super|rare|ultra|full|art)$/i.test(x));
     const titleCompact=compact(titleText);
