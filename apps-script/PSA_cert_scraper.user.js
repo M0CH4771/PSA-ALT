@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PSA Cert Reader for PSA-ALT
 // @namespace    M0CH4771.PSA-ALT
-// @version      1.2.0
+// @version      1.3.0
 // @updateURL    https://raw.githubusercontent.com/M0CH4771/PSA-ALT/main/apps-script/PSA_cert_scraper.user.js
 // @downloadURL  https://raw.githubusercontent.com/M0CH4771/PSA-ALT/main/apps-script/PSA_cert_scraper.user.js
 // @description  Reads the visible PSA certification page and returns its cert, subject, grade, and official image to the batch app.
@@ -28,7 +28,7 @@
 
   const clean = s => String(s || '').replace(/\u00a0/g,' ').replace(/\r/g,'').replace(/[ \t]+/g,' ').trim();
   const report = (ok, fields={}, reason='') => {
-    box.textContent = ok ? `PSA照合完了: ${fields.name} / ${fields.grade}` : `PSA照合を保留: ${reason}`;
+    box.textContent = ok ? `PSA照合完了: ${fields.name} / ${fields.grade} / ${fields.imageUrl?'画像URL取得済み':'公式画像URLなし'}` : `PSA照合を保留: ${reason}`;
     if (!window.opener) { box.textContent += '（Webアプリへ戻れません。ポップアップを許可してやり直してください）'; return; }
     window.opener.postMessage({type:'PSA_CERT_RESULT',nonce,cert,ok,reason,...fields}, '*');
   };
@@ -60,10 +60,18 @@
 
     const img = [...document.querySelectorAll('img[alt]')].find(el=>/^Cert image\s*1$/i.test(clean(el.alt)));
     let imageUrl = '';
-    try {
-      const candidate = new URL(img?.currentSrc || img?.src || '', location.href);
-      if (candidate.protocol==='https:' && /(^|\.)psacard\.com$/i.test(candidate.hostname)) imageUrl=candidate.href;
-    } catch (_) {}
+    // PSA's official Cert image 1 is currently served by this exact CDN.
+    // Use the URL from the image element, not a URL inferred from the cert number.
+    for(const source of [img?.currentSrc,img?.getAttribute('src'),img?.src]) {
+      if(!source) continue;
+      try {
+        const candidate=new URL(source,location.href);
+        const psaHost=/(^|\.)psacard\.com$/i.test(candidate.hostname);
+        const officialCdn=candidate.hostname.toLowerCase()==='d1htnxwo4o0jhw.cloudfront.net' &&
+          /^\/cert\/\d+\/(?:[^/?#]+\/)*[^/?#]+\.(?:jpe?g|png|webp)$/i.test(candidate.pathname);
+        if(candidate.protocol==='https:'&&(psaHost||officialCdn)) { imageUrl=candidate.href; break; }
+      } catch (_) {}
+    }
 
     return {
       name:title,
@@ -75,10 +83,17 @@
     };
   }
   let attempts = 0;
+  let detailsReadyAt=0;
   const timer = setInterval(() => {
     attempts++;
     const result = readPage();
-    if (result) { clearInterval(timer); report(true,result); return; }
+    if(result) {
+      if(!detailsReadyAt) detailsReadyAt=Date.now();
+      if(result.imageUrl || Date.now()-detailsReadyAt>=5000 || attempts>=30) {
+        clearInterval(timer); report(true,result); return;
+      }
+      box.textContent='PSAカードを照合済み。公式画像を読み込み中…';
+    }
     if (attempts >= 30) {
       clearInterval(timer);
       report(false,{},'PSAページから証明番号・Subject・グレードを読み取れませんでした。PSAページが表示できているか確認してください。');
