@@ -55,7 +55,7 @@
         <textarea id="cert" inputmode="numeric" autocomplete="off" rows="4" placeholder="バーコードを読む／鑑定番号を改行区切りで貼り付け"></textarea>
         <button id="addButton" type="button" class="secondary">手動で追加</button>
       </div>
-      <p class="small">スキャナーは1件ずつ自動追加します。複数番号を貼り付ける場合は、1行に1番号で入力してください。全角数字は半角に変換します。</p>
+      <p class="small">スキャナーは入力が止まってから約1.2秒後に自動追加します。13桁以上のコードは読み飛ばします。複数番号は1行に1番号で貼り付けてください。全角数字は半角に変換します。</p>
       <ul id="queue"></ul>
       <div class="actions">
         <button id="processButton" type="button">検索して反映</button>
@@ -171,9 +171,14 @@
 
     var added = 0;
     var duplicates = 0;
+    var longCodes = 0;
     var invalid = [];
     lines.forEach(function(line) {
       var cert = digits(line);
+      if (cert.length > 12) {
+        longCodes++;
+        return;
+      }
       if (!/^\d{6,12}$/.test(cert)) {
         invalid.push(line);
         return;
@@ -189,10 +194,11 @@
     input.value = '';
     renderQueue();
     var message = added + '件をリストに追加しました。';
+    if (longCodes) message = longCodes + '件の長いコード（13桁以上）を読み飛ばしました。' + (added ? ' 鑑定番号 ' + added + '件を追加しました。' : ' PSA番号の読み取りを続けてください。');
     if (duplicates) message += ' 重複 ' + duplicates + '件はスキップしました。';
-    if (invalid.length) message += ' 番号の桁数が不正な行 ' + invalid.length + '件は追加していません。';
-    if (!added && duplicates && !invalid.length) message = '入力した番号はすべてリストにあります。重複分は追加していません。';
-    if (!added && invalid.length) message = '有効な番号を追加できませんでした。各行が6〜12桁か確認してください。';
+    if (invalid.length) message += ' 6〜12桁ではない行 ' + invalid.length + '件は追加していません。';
+    if (!added && duplicates && !invalid.length && !longCodes) message = '入力した番号はすべてリストにあります。重複分は追加していません。';
+    if (!added && invalid.length && !longCodes) message = '有効な番号を追加できませんでした。各行が6〜12桁か確認してください。';
     setStatus(message, invalid.length ? 'error' : '');
     input.focus();
   }
@@ -212,8 +218,11 @@
     clearTimeout(autoAddTimer);
     autoAddTimer = setTimeout(function() {
       var lines = $('cert').value.split(/\r?\n/).map(function(line) { return line.trim(); }).filter(Boolean);
-      if (lines.length && lines.every(function(line) { return /^\d{6,12}$/.test(digits(line)); })) addCert();
-    }, 600);
+      if (lines.length && lines.every(function(line) {
+        var count = digits(line).length;
+        return /^\d{6,12}$/.test(digits(line)) || count > 12;
+      })) addCert();
+    }, 1200);
   }
 
   function setItem(index, state, status, detail) {
