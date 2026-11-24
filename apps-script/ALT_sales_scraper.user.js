@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PSA-ALT Cert Search and Sales Copier
 // @namespace    M0CH4771.PSA-ALT
-// @version      3.14.0
+// @version      3.15.0
 // @updateURL    https://raw.githubusercontent.com/M0CH4771/PSA-ALT/main/apps-script/ALT_sales_scraper.user.js
 // @downloadURL  https://raw.githubusercontent.com/M0CH4771/PSA-ALT/main/apps-script/ALT_sales_scraper.user.js
 // @description  Searches ALT by PSA card name, confirms exact card number and grade, and copies only verified sales.
@@ -107,12 +107,35 @@
     return setWords.every(w=>actual.has(w));
   }
 
+  // Search results are discovery evidence, not the final card identity.
+  // ALT sometimes omits the set/edition text in a result tile.
+  // Keep plausible results for detail inspection; never use this alone to write prices.
+  function candidateIdentityMatches(raw,ctx) {
+    if(identityMatches(raw,ctx)) return true;
+    const title=identityTitle(ctx);
+    const subject=coreSubject(title)||String(ctx.subject||'').trim();
+    const number=(title.match(/#\s*0*(\d{1,4})\b/i)||[])[1];
+    const year=(title.match(/\b(?:19|20)\d{2}\b/)||[])[0];
+    if(!number||!year||!subject) return false;
+    if(!new RegExp('#\\s*0*'+number+'\\b','i').test(raw)||!raw.includes(year)) return false;
+    const tokens=value=>norm(value).normalize('NFKD').replace(/[\u0300-\u036f]/g,'').match(/[\p{L}\p{N}]+/gu)||[];
+    const actual=new Set(tokens(raw));
+    const nameTokens=tokens(subject);
+    if(!nameTokens.length||!actual.has(nameTokens[0])) return false;
+    // A known conflicting language is never a plausible candidate.
+    const languages=/\b(japanese|korean|english|chinese|mandarin|cantonese|thai|indonesian|german|french|italian|spanish)\b/ig;
+    const expected=(title.match(languages)||[]).map(norm);
+    const observed=(raw.match(languages)||[]).map(norm);
+    if(expected.length&&observed.length&&!observed.some(l=>expected.includes(l))) return false;
+    return true;
+  }
+
   function candidateItems(ctx) {
     const found=new Map();
     for(const el of document.querySelectorAll('a[href*="/itm/"],button,[role="button"],[role="row"],[role="option"],[tabindex],div,tr')) {
       if(!visible(el)||el===b||el.closest('header,nav,aside,footer')) continue;
       const raw=[el.innerText,el.getAttribute('aria-label'),el.title,...[...el.querySelectorAll('img[alt]')].map(img=>img.alt)].filter(Boolean).join(' ').trim();
-      if(!raw||raw.length>500||!identityMatches(raw,ctx)) continue;
+      if(!raw||raw.length>500||!candidateIdentityMatches(raw,ctx)) continue;
       let path='';
       const anchor=el.matches('a[href]')?el:el.querySelector('a[href*="/itm/"]');
       if(anchor) {
@@ -135,13 +158,13 @@
     for(const item of items) {
       const label=String(item.link.innerText||'').replace(/\s+/g,' ').trim();
       // A card image might carry the title/grade only in alt text. In all cases re-check on detail.
-      const evidence=identityMatches(label,ctx)?label:item.title;
-      if(item.path && (!identityMatches(evidence,ctx)||(/\b(?:PSA|CGC|BGS|SGC|TAG)\s+\d+(?:\.\d+)?\b/i.test(evidence)&&!gradeRe.test(evidence)))) continue;
+      const evidence=candidateIdentityMatches(label,ctx)?label:item.title;
+      if(item.path && (!candidateIdentityMatches(evidence,ctx)||(/\b(?:PSA|CGC|BGS|SGC|TAG)\s+\d+(?:\.\d+)?\b/i.test(evidence)&&!gradeRe.test(evidence)))) continue;
       if(!item.path && !item.link.matches('button,[role="button"],[role="option"],[role="row"],tr,[tabindex]') && getComputedStyle(item.link).cursor!=='pointer') continue;
       const key=item.path||'text:'+compact(label.replace(/#\s*0+(?=\d)/g,'#'));
-      if(!results.has(key)) results.set(key,{...item,key});
+      if(!results.has(key)) results.set(key,{...item,key,strict:identityMatches(item.title,ctx)});
     }
-    return [...results.values()].sort((a,b)=>Number(gradeRe.test(b.title))-Number(gradeRe.test(a.title))||Number(!!b.path)-Number(!!a.path));
+    return [...results.values()].sort((a,b)=>Number(b.strict)-Number(a.strict)||Number(gradeRe.test(b.title))-Number(gradeRe.test(a.title))||Number(!!b.path)-Number(!!a.path));
   }
 
   function candidateKey(item) {
@@ -154,6 +177,7 @@
     const key=candidateKey(candidate);
     ctx.attempted=[...new Set([...(ctx.attempted||[]),key])];
     ctx.altTitle=candidate.title;
+    ctx.candidateStrict=!!candidate.strict;
     ctx.numberVerified=true;
     ctx.route='opening';
     delete ctx.researchPath;
@@ -271,7 +295,7 @@
     if(!candidates.length) {
       nextQuery(ctx.lastFailure||'検索は実行済みですが、カード条件が一致する画像付き商品・文字候補を取得できません。'); return;
     }
-    ctx.candidates=candidates.map(({key,path,title})=>({key,path,title}));
+    ctx.candidates=candidates.map(({key,path,title,strict})=>({key,path,title,strict}));
     openCandidate(ctx,candidates[0]);
   }
 
@@ -427,7 +451,11 @@
     runningFor=key;
     phase(marketTitleVisible()?'Market transactionsは開いています。カード情報を照合中…':'ALTカード詳細を照合中…');
     const titleText=await waitFor(()=>detailTitle(ctx),12000);
-    if(!titleText) { retryCandidate(ctx,'ALTカード詳細でカード名・型番・セット・言語・版を照合できません。'); return; }
+    if(!titleText) {
+      const heading=[...document.querySelectorAll('main h1,main h2,main [role="heading"]')].map(el=>String(el.innerText||'').trim()).find(t=>candidateIdentityMatches(t,ctx));
+      retryCandidate(ctx,'ALTカード詳細がPSA公式と完全一致しません。PSA: '+identityTitle(ctx)+' / ALT: '+(heading||ctx.altTitle||'詳細タイトル不明'));
+      return;
+    }
     const subject=coreSubject(identityTitle(ctx))||String(ctx.subject||ctx.cardName||'').trim();
     const subjectTerms=norm(subject).replace(/[^\p{L}\p{N}#']+/gu,' ').split(/\s+/).filter(x=>x.length>1&&!/^(pokemon|japanese|english|card|psa|gem|mt|super|rare|ultra|full|art)$/i.test(x));
     const titleCompact=compact(titleText);
