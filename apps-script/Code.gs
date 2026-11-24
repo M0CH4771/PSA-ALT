@@ -6,6 +6,7 @@ var PSA_ALT_COLUMNS = {
   cert: 1,
   name: 2,
   image: 3,
+  imageUrl: 9,
   price: 4,
   alt: 5,
   previous: 6,
@@ -136,6 +137,7 @@ function writePricedCard(payload) {
   if (imageUrl) {
     sheet.getRange(row, PSA_ALT_COLUMNS.image).setFormula('=IMAGE("' + imageUrl.replace(/"/g, '') + '",1)');
   }
+  sheet.getRange(row, PSA_ALT_COLUMNS.imageUrl).setValue(imageUrl);
   sheet.getRange(row, PSA_ALT_COLUMNS.price).setValue(adopted.price);
   sheet.getRange(row, PSA_ALT_COLUMNS.alt).setValue(altUrl);
   sheet.getRange(row, PSA_ALT_COLUMNS.previous).setValue(previous.price);
@@ -211,7 +213,7 @@ function setSummaryHeaders_(sheet) {
     '前回成約 USD',
     '',
     '採用価格 USD',
-    '',
+    'PSA画像URL',
     '',
     '最新成約 USD'
   ]]);
