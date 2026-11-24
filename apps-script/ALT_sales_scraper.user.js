@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PSA-ALT Cert Search and Sales Copier
 // @namespace    M0CH4771.PSA-ALT
-// @version      3.1.0
+// @version      3.2.0
 // @description  Searches ALT by PSA cert, selects the exact grade, and returns confirmed sales to the batch app.
 // @match        https://alt.xyz/browse*
 // @match        https://alt.xyz/itm/*/research*
@@ -68,11 +68,38 @@
     return [...byText.values()];
   }
 
+  function browseSearchInput() {
+    return document.querySelector('#universal-search-autocomplete') ||
+      [...document.querySelectorAll('input')].find(el =>
+        /search/i.test((el.getAttribute('aria-label')||'')+' '+(el.placeholder||'')+' '+(el.id||'')));
+  }
+
+  async function submitCertSearch(input, cert) {
+    const current=String(input.value||'').replace(/\\D/g,'');
+    if(current!==cert) {
+      const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')?.set;
+      if(setter) setter.call(input,cert); else input.value=cert;
+      input.dispatchEvent(new Event('input',{bubbles:true}));
+      input.dispatchEvent(new Event('change',{bubbles:true}));
+    }
+    input.focus();
+    const key={key:'Enter',code:'Enter',keyCode:13,which:13,bubbles:true,cancelable:true};
+    input.dispatchEvent(new KeyboardEvent('keydown',key));
+    input.dispatchEvent(new KeyboardEvent('keypress',key));
+    input.dispatchEvent(new KeyboardEvent('keyup',key));
+  }
+
   async function openSingleCertCandidate() {
     const ctx=readContext();
     if (!ctx || !/^\/browse\/?$/.test(location.pathname) || ctx.route!=='browse') return;
     if (runningFor===`browse:${ctx.cert}`) return;
     runningFor=`browse:${ctx.cert}`;
+
+    const searchInput=await waitFor(browseSearchInput,10000);
+    if(!searchInput) { report(ctx,false,'ALTの検索欄が見つからず、鑑定番号を検索できませんでした。'); return; }
+    await submitCertSearch(searchInput,ctx.cert);
+    say(`鑑定番号 ${ctx.cert} でALT検索を実行しました。検索結果を確認しています…`);
+
     const deadline=Date.now()+20000;
     while(Date.now()<deadline) {
       const candidates=candidateButtons();
