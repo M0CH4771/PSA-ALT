@@ -2,9 +2,10 @@
 // @name         PSA-ALT Cert Search and Sales Copier
 // @namespace    M0CH4771.PSA-ALT
 // @version      3.5.0
-// @description  Searches ALT by PSA cert, selects the exact grade, and returns confirmed sales to the batch app.
+// @description  Searches ALT by the PSA card title, selects a matching item, and returns confirmed sales to the batch app.
 // @match        https://alt.xyz/browse*
-// @match        https://alt.xyz/itm/*/research*\n// @match        https://alt.xyz/itm/*/external*
+// @match        https://alt.xyz/itm/*/research*
+// @match        https://alt.xyz/itm/*/external*
 // @run-at       document-idle
 // @grant        GM_setValue
 // ==/UserScript==
