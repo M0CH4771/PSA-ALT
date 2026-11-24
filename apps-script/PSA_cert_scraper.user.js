@@ -2,6 +2,8 @@
 // @name         PSA Cert Reader for PSA-ALT
 // @namespace    M0CH4771.PSA-ALT
 // @version      1.1.0
+// @updateURL    https://raw.githubusercontent.com/M0CH4771/PSA-ALT/main/apps-script/PSA_cert_scraper.user.js
+// @downloadURL  https://raw.githubusercontent.com/M0CH4771/PSA-ALT/main/apps-script/PSA_cert_scraper.user.js
 // @description  Reads the visible PSA certification page and returns its cert, subject, grade, and official image to the batch app.
 // @match        https://www.psacard.com/cert/*
 // @run-at       document-idle
