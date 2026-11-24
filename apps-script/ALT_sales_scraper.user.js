@@ -89,11 +89,11 @@
         /search/i.test((el.getAttribute('aria-label')||'')+' '+(el.placeholder||'')+' '+(el.id||'')));
   }
 
-  async function submitCertSearch(input, cert) {
-    const current=String(input.value||'').replace(/\D/g,'');
-    if(current!==cert) {
+  async function submitSearch(input, query) {
+    query=String(query||'').trim();
+    if(norm(input.value)!==norm(query)) {
       const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')?.set;
-      if(setter) setter.call(input,cert); else input.value=cert;
+      if(setter) setter.call(input,query); else input.value=query;
       input.dispatchEvent(new Event('input',{bubbles:true}));
       input.dispatchEvent(new Event('change',{bubbles:true}));
     }
@@ -126,12 +126,12 @@
 
     let candidates=[];
     if(ctx.cardName) {
-      await submitCertSearch(searchInput,ctx.cardName);
+      await submitSearch(searchInput,ctx.cardName);
       say('PSA公式のカード名でALT検索しています…');
       candidates=await waitForCandidates(10000,ctx);
     }
     if(!candidates.length) {
-      await submitCertSearch(searchInput,ctx.cert);
+      await submitSearch(searchInput,ctx.cert);
       say('カード名で一致候補がないため、鑑定番号で再検索しています…');
       candidates=await waitForCandidates(10000,ctx);
     }
