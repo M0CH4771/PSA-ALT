@@ -296,8 +296,10 @@ function isPsaCertUrl_(value, cert) {
 }
 
 function isPsaImageUrl_(value) {
-  // Allow only HTTPS URLs whose host is psacard.com or one of its subdomains.
-  return /^https:\/\/(?:[a-z0-9-]+\.)*psacard\.com(?:[/:?#]|$)/i.test(String(value || '').trim());
+  var url = String(value || '').trim();
+  // PSA cert image distribution: allow PSA hosts and the exact observed CDN.
+  return /^https:\/\/(?:[a-z0-9-]+\.)*psacard\.com(?:[/?#]|$)/i.test(url) ||
+    /^https:\/\/d1htnxwo4o0jhw\.cloudfront\.net\/cert\/\d+\/(?:[^/?#]+\/)*[^/?#]+\.(?:jpe?g|png|webp)(?:[?#].*)?$/i.test(url);
 }
 
 function isAltResearchUrl_(value) {
