@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         PSA-ALT Cert Search and Sales Copier
 // @namespace    M0CH4771.PSA-ALT
-// @version      3.4.0
+// @version      3.5.0
 // @description  Searches ALT by PSA cert, selects the exact grade, and returns confirmed sales to the batch app.
 // @match        https://alt.xyz/browse*
-// @match        https://alt.xyz/itm/*/research*
+// @match        https://alt.xyz/itm/*/research*\n// @match        https://alt.xyz/itm/*/external*
 // @run-at       document-idle
 // @grant        GM_setValue
 // ==/UserScript==
@@ -49,23 +49,37 @@
     if (!/^\d{6,12}$/.test(cert) || !/^\d+(?:\.5)?$/.test(grade)) return;
     const nonce=String(params.get('psaNonce')||'');
     const batch=params.get('psaBatch')==='1' && /^[\w-]{10,100}$/.test(nonce);
-    const ctx = { cert, grade:`PSA ${Number(grade)}`, cardName:params.get('psaName')||'', nonce, batch, createdAt:Date.now(), route:'browse' };
+    const ctx = { cert, grade:`PSA ${Number(grade)}`, cardName:params.get('psaName')||'', subject:params.get('psaSubject')||'', nonce, batch, createdAt:Date.now(), route:'browse' };
     saveContext(ctx);
     say(`鑑定番号 ${cert} でALT検索中です。候補カードを確認しています…`);
   }
 
   b.hidden=/^\/browse\/?$/.test(location.pathname);
 
-  function candidateButtons() {
-    const ignored = /^(?:view all|hide filters|show filters|sort by|sold listings|saved searches|save search|buy|buy \/ offer|all items|auctions|fixed price)$/i;
-    const byText = new Map();
-    for (const el of document.querySelectorAll('button')) {
-      const text=(el.innerText||'').replace(/\s+/g,' ').trim();
-      if (!text || text.length < 18 || ignored.test(text) || /listing|filter|marketplace|category|grade|price range|year range/i.test(text)) continue;
-      if (el.closest('[role="menu"]')) continue;
-      byText.set(text,el);
+  function candidateItems(ctx) {
+    const subject=norm(ctx.subject||'').replace(/^(?:fa|full art)\s*\/\s*/,'');
+    const grade=norm(ctx.grade).replace(/\s+/g,'');
+    const number=(ctx.cardName.match(/#\s*0*(\d{1,4})/i)||[])[1]||'';
+    const language=(ctx.cardName.match(/\b(japanese|korean|english|chinese|mandarin|cantonese|thai|indonesian|german|french|italian|spanish)\b/i)||[])[1]||'';
+    const byPath=new Map();
+    for(const link of document.querySelectorAll('a[href*="/itm/"]')) {
+      let url;
+      try { url=new URL(link.href); } catch (_) { continue; }
+      if(!/^\/itm\/[0-9a-f-]+\/external\/?$/i.test(url.pathname)) continue;
+      const imageText=[...link.querySelectorAll('img[alt]')].map(img=>img.alt||'').join(' ');
+      const raw=[link.innerText,link.getAttribute('aria-label'),link.title,imageText].join(' ');
+      const text=norm(raw);
+      if(subject&&!text.includes(subject)) continue;
+      if(grade&&!text.replace(/\s+/g,'').includes(grade)) continue;
+      if(number&&!new RegExp('#\\s*0*'+number+'(?:\\D|$)','i').test(raw)) continue;
+      if(language&&!text.includes(language.toLowerCase())) continue;
+      const path=url.pathname;
+      const previous=byPath.get(path);
+      if(!previous || String(link.innerText||'').length>String(previous.link.innerText||'').length) {
+        byPath.set(path,{link,title:String(link.innerText||imageText||'').trim(),path});
+      }
     }
-    return [...byText.values()];
+    return [...byPath.values()];
   }
 
   function browseSearchInput() {
@@ -89,10 +103,10 @@
     input.dispatchEvent(new KeyboardEvent('keyup',key));
   }
 
-  async function waitForCandidates(timeoutMs) {
+  async function waitForCandidates(timeoutMs,ctx) {
     const deadline=Date.now()+timeoutMs;
     while(Date.now()<deadline) {
-      const candidates=candidateButtons();
+      const candidates=candidateItems(ctx);
       if(candidates.length) return candidates;
       if(/couldn't find any results|no results found/i.test(document.body.innerText||'')) return [];
       await sleep(350);
@@ -112,27 +126,24 @@
     let candidates=[];
     if(ctx.cardName) {
       await submitCertSearch(searchInput,ctx.cardName);
-      say('PSA公式のカード名「'+ctx.cardName+'」でALT検索しています…');
-      candidates=await waitForCandidates(10000);
+      say('PSA公式のカード名でALT検索しています…');
+      candidates=await waitForCandidates(10000,ctx);
     }
     if(!candidates.length) {
       await submitCertSearch(searchInput,ctx.cert);
-      say((ctx.cardName?'カード名で候補が見つからないため、':'')+'鑑定番号 '+ctx.cert+' でALTを再検索しています…');
-      candidates=await waitForCandidates(10000);
+      say('カード名で一致候補がないため、鑑定番号で再検索しています…');
+      candidates=await waitForCandidates(10000,ctx);
     }
 
-    if(candidates.length===1) {
-      const title=(candidates[0].innerText||'').trim();
-      ctx.altTitle=title; ctx.route='opening'; saveContext(ctx);
-      say('ALT候補を開きます: '+title+'\nPSA公式のカード情報と一致するか確認してください。');
-      candidates[0].click();
+    if(candidates.length) {
+      const candidate=candidates[0];
+      ctx.altTitle=candidate.title||candidate.path;
+      ctx.route='opening'; saveContext(ctx);
+      say('ALTの一致カードを開きます: '+ctx.altTitle);
+      candidate.link.click();
       return;
     }
-    if(candidates.length>1) {
-      report(ctx,false,'ALT候補が'+candidates.length+'件あります。誤選択を防ぐため保留しました。');
-      return;
-    }
-    report(ctx,false,'カード名と鑑定番号の両方でALT候補を取得できませんでした。');
+    report(ctx,false,'カード名・セット・言語・番号・グレードが一致するALT候補を取得できませんでした。');
   }
 
   function currentGradeButton() {
@@ -159,21 +170,29 @@
     }
     return candidates[0]||null;
   }
-  async function openTransactions() {
-    const direct=viewAllControls(document);
-    for(const control of direct) {
-      let node=control;
-      for(let i=0;node&&i<10;i++,node=node.parentElement) {
-        if(/recent transactions/i.test(norm(node.innerText||''))) { control.click(); return true; }
+  async function openTransactions(timeoutMs=10000) {
+    const deadline=Date.now()+timeoutMs;
+    while(Date.now()<deadline) {
+      const direct=viewAllControls(document);
+      for(const control of direct) {
+        let node=control;
+        for(let i=0;node&&i<10;i++,node=node.parentElement) {
+          if(/recent transactions/i.test(norm(node.innerText||''))) {
+            control.click();
+            return true;
+          }
+        }
       }
-    }
-    const heading=recentTransactionsHeading();
-    if(!heading) return false;
-    let node=heading;
-    for(let i=0;node&&i<10;i++,node=node.parentElement) {
-      if(!/recent transactions/i.test(norm(node.innerText||''))) continue;
-      const control=viewAllControls(node)[0];
-      if(control) { control.click(); return true; }
+      const heading=recentTransactionsHeading();
+      if(heading) {
+        let node=heading;
+        for(let i=0;node&&i<10;i++,node=node.parentElement) {
+          if(!/recent transactions/i.test(norm(node.innerText||''))) continue;
+          const control=viewAllControls(node)[0];
+          if(control) { control.click(); return true; }
+        }
+      }
+      await sleep(250);
     }
     return false;
   }
@@ -212,7 +231,7 @@
 
   async function autoResearch() {
     const ctx=readContext();
-    if(!ctx || !/^\/itm\/[0-9a-f-]+\/research\/?$/i.test(location.pathname)) return;
+    if(!ctx || !/^\/itm\/[0-9a-f-]+\/(?:research|external)\/?$/i.test(location.pathname)) return;
     if(ctx.route==='browse') { ctx.route='opening'; saveContext(ctx); }
     if(ctx.route!=='opening' && ctx.route!=='research') return;
     if(ctx.route==='research' && ctx.researchPath!==location.pathname) return;
