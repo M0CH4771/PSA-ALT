@@ -117,7 +117,7 @@
 
   async function openSingleCertCandidate() {
     const ctx=readContext();
-    if (!ctx || !/^\\/browse\\/?$/.test(location.pathname)) return;
+    if (!ctx || !/^\/browse\/?$/.test(location.pathname)) return;
     const route=ctx.route||'browse';
     if(!['browse','name-search','cert-search'].includes(route)) return;
     const runKey='browse:'+ctx.cert+':'+route;
