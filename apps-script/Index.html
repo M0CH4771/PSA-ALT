@@ -50,12 +50,15 @@
       <h2>鑑定番号を読み取る</h2>
       <label for="targetDate">記入する日付</label>
       <div class="dateRow"><input id="targetDate" type="date"></div>
-      <label for="cert">PSA証明番号</label>
+      <label for="cert">PSA証明番号（バーコード読み取り）</label>
       <div class="scanRow">
-        <textarea id="cert" inputmode="numeric" autocomplete="off" rows="4" placeholder="バーコードを読む／鑑定番号を改行区切りで貼り付け"></textarea>
+        <input id="cert" inputmode="numeric" autocomplete="off" placeholder="ここを選択してバーコードを読み取る">
         <button id="addButton" type="button" class="secondary">手動で追加</button>
       </div>
-      <p class="small">スキャナーは入力が止まってから約1.2秒後に自動追加します。13桁以上のコードは読み飛ばします。複数番号は1行に1番号で貼り付けてください。全角数字は半角に変換します。</p>
+      <p class="small">バーコードは1枚ずつ読み取ります。入力が止まってから約1.2秒後に自動追加します。13桁以上のコードは読み飛ばします。全角数字は半角に変換します。</p>
+      <label for="certBulk">複数番号を改行区切りで貼り付け</label>
+      <textarea id="certBulk" autocomplete="off" rows="3" placeholder="159104330&#10;163363375&#10;158921986"></textarea>
+      <div class="actions"><button id="addBulkButton" type="button" class="secondary">改行ごとにリストへ追加</button></div>
       <ul id="queue"></ul>
       <div class="actions">
         <button id="processButton" type="button">検索して反映</button>
@@ -157,15 +160,15 @@
     });
   }
 
-  function addCert() {
+  function addCert(sourceId) {
     if (busy) return;
     clearTimeout(autoAddTimer);
-    var input = $('cert');
+    var input = $(sourceId || 'cert');
     input.value = halfWidth(input.value);
     var lines = input.value.split(/\r?\n/).map(function(line) { return line.trim(); }).filter(Boolean);
     if (!lines.length) {
       setStatus('鑑定番号を入力するか、改行区切りで貼り付けてください。', 'error');
-      input.focus();
+      $('cert').focus();
       return;
     }
 
@@ -200,7 +203,7 @@
     if (!added && duplicates && !invalid.length && !longCodes) message = '入力した番号はすべてリストにあります。重複分は追加していません。';
     if (!added && invalid.length && !longCodes) message = '有効な番号を追加できませんでした。各行が6〜12桁か確認してください。';
     setStatus(message, invalid.length ? 'error' : '');
-    input.focus();
+    $('cert').focus();
   }
 
   function onScannerInput() {
@@ -263,6 +266,7 @@
     busy = true;
     $('processButton').disabled = true;
     $('addButton').disabled = true;
+    $('addBulkButton').disabled = true;
     $('clearButton').disabled = true;
     setStatus('日付まとめシートを準備しています…');
 
@@ -446,6 +450,7 @@
     activeNonce = '';
     $('processButton').disabled = false;
     $('addButton').disabled = false;
+    $('addBulkButton').disabled = false;
     $('clearButton').disabled = false;
     if (popupWindow && !popupWindow.closed) popupWindow.close();
     popupWindow = null;
@@ -461,7 +466,8 @@
     return error && error.message ? error.message : String(error || '不明なエラー');
   }
 
-  $('addButton').addEventListener('click', addCert);
+  $('addButton').addEventListener('click', function() { addCert('cert'); });
+  $('addBulkButton').addEventListener('click', function() { addCert('certBulk'); });
   $('processButton').addEventListener('click', startBatch);
   $('clearButton').addEventListener('click', function() {
     if (busy) return;
@@ -475,7 +481,7 @@
     if (event.key === 'Enter') {
       event.preventDefault();
       clearTimeout(autoAddTimer);
-      addCert();
+      addCert('cert');
     }
   });
   window.addEventListener('message', onMessage);
