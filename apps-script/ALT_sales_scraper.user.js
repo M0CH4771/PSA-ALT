@@ -268,10 +268,10 @@
     for(const el of rows) {
       const parsed=rowData(el);
       if(!parsed) continue;
-      const a=el.closest('a[href]')||el.matches('a[href]')?el:el.querySelector('a[href]');
+      const a=el.closest('a[href]')||(el.matches('a[href]')?el:el.querySelector('a[href]'));
       const href=a?.href||'';
       const ebayId=(href.match(/ebay\.com\/itm\/(\d{9,15})/i)||[])[1];
-      const key=ebayId?'ebay:'+ebayId:href?href:parsed.date.toISOString().slice(0,10)+'|'+parsed.price+'|'+parsed.method+'|'+parsed.text;
+      const key=ebayId?'ebay:'+ebayId:href?href:el;
       if(seen.has(key)) continue;
       seen.add(key);
       const imgAlt=el.querySelector('img[alt]')?.alt?.trim()||'';
