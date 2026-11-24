@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         PSA-ALT Cert Search and Sales Copier
 // @namespace    M0CH4771.PSA-ALT
-// @version      3.5.0
-// @description  Searches ALT by the PSA card title, selects a matching item, and returns confirmed sales to the batch app.
+// @version      3.6.0
+// @description  Navigates ALT search by the PSA card title, selects a matching item, and returns confirmed sales to the batch app.
 // @match        https://alt.xyz/browse*
 // @match        https://alt.xyz/itm/*/research*
 // @match        https://alt.xyz/itm/*/external*
@@ -117,34 +117,47 @@
 
   async function openSingleCertCandidate() {
     const ctx=readContext();
-    if (!ctx || !/^\/browse\/?$/.test(location.pathname) || ctx.route!=='browse') return;
-    if (runningFor==='browse:'+ctx.cert) return;
-    runningFor='browse:'+ctx.cert;
+    if (!ctx || !/^\\/browse\\/?$/.test(location.pathname)) return;
+    const route=ctx.route||'browse';
+    if(!['browse','name-search','cert-search'].includes(route)) return;
+    const runKey='browse:'+ctx.cert+':'+route;
+    if(runningFor===runKey) return;
+    runningFor=runKey;
 
-    const searchInput=await waitFor(browseSearchInput,10000);
-    if(!searchInput) { report(ctx,false,'ALTの検索欄が見つからず、カードを検索できませんでした。'); return; }
-
-    let candidates=[];
-    if(ctx.cardName) {
-      await submitSearch(searchInput,ctx.cardName);
-      say('PSA公式のカード名でALT検索しています…');
-      candidates=await waitForCandidates(10000,ctx);
-    }
-    if(!candidates.length) {
-      await submitSearch(searchInput,ctx.cert);
-      say('カード名で一致候補がないため、鑑定番号で再検索しています…');
-      candidates=await waitForCandidates(10000,ctx);
+    function navigateSearch(query,nextRoute,message) {
+      ctx.route=nextRoute;
+      saveContext(ctx);
+      const url=new URL('/browse',location.origin);
+      url.searchParams.set('query',query);
+      say(message);
+      location.assign(url.href);
     }
 
+    if(route==='browse') {
+      if(ctx.cardName) {
+        navigateSearch(ctx.cardName,'name-search','PSA公式のカード名でALT検索しています…');
+      } else {
+        navigateSearch(ctx.cert,'cert-search','カード名が取得できないため、鑑定番号でALT検索しています…');
+      }
+      return;
+    }
+
+    const candidates=await waitForCandidates(10000,ctx);
     if(candidates.length) {
       const candidate=candidates[0];
       ctx.altTitle=candidate.title||candidate.path;
-      ctx.route='opening'; saveContext(ctx);
+      ctx.route='opening';
+      saveContext(ctx);
       say('ALTの一致カードを開きます: '+ctx.altTitle);
       candidate.link.click();
       return;
     }
-    report(ctx,false,'カード名・セット・言語・番号・グレードが一致するALT候補を取得できませんでした。');
+
+    if(route==='name-search') {
+      navigateSearch(ctx.cert,'cert-search','カード名検索で候補商品が見つからず、鑑定番号でも確認しています…');
+      return;
+    }
+    report(ctx,false,'カード名検索と鑑定番号検索の両方で、カード番号・言語・PSAグレードが一致するALT商品リンクを取得できませんでした。');
   }
 
   function currentGradeButton() {
