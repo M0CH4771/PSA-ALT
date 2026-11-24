@@ -262,6 +262,7 @@
     var psa = {
       cert: cert,
       name: String(data.name || '').trim(),
+      fullName: String(data.fullName || data.name || '').trim(),
       grade: String(data.grade || '').trim(),
       imageUrl: String(data.imageUrl || ''),
       url: String(data.url || '')
@@ -283,7 +284,8 @@
     altUrl.searchParams.set('psaGrade', psa.grade.replace(/^PSA\s*/i, ''));
     altUrl.searchParams.set('psaBatch', '1');
     altUrl.searchParams.set('psaNonce', activeNonce);
-    altUrl.searchParams.set('psaName', psa.name);
+    altUrl.searchParams.set('psaName', psa.fullName || psa.name);
+    altUrl.searchParams.set('psaSubject', psa.name);
     popupWindow.location.href = altUrl.href;
     armStageTimeout(index, 'alt-page', 'ALTから返事がありません。ALT用Tampermonkeyスクリプトや検索ページを確認してください。');
   }
