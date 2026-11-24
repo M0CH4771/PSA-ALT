@@ -1,13 +1,12 @@
 // ==UserScript==
 // @name         PSA-ALT Cert Search and Sales Copier
 // @namespace    M0CH4771.PSA-ALT
-// @version      3.15.0
+// @version      3.16.0
 // @updateURL    https://raw.githubusercontent.com/M0CH4771/PSA-ALT/main/apps-script/ALT_sales_scraper.user.js
 // @downloadURL  https://raw.githubusercontent.com/M0CH4771/PSA-ALT/main/apps-script/ALT_sales_scraper.user.js
 // @description  Searches ALT by PSA card name, confirms exact card number and grade, and copies only verified sales.
 // @match        https://alt.xyz/browse*
-// @match        https://alt.xyz/itm/*/research*
-// @match        https://alt.xyz/itm/*/external*
+// @match        https://alt.xyz/itm/*
 // @run-at       document-idle
 // @grant        GM_setValue
 // ==/UserScript==
@@ -86,7 +85,15 @@
       return '2021 POKEMON JAPANESE 25TH ANNIVERSARY GOLDEN BOX #001 PIKACHU V';
     return title;
   }
+  function normalizeAltLabel(value) {
+    // Text extraction can concatenate adjacent spans, e.g. RareMega/RareLillie's.
+    return String(value||'').replace(/\b(Rare|Promo|Common|Uncommon|Illustration|Full Art)(?=[A-Z][a-z])/g,'$1 ').replace(/\s+/g,' ').trim();
+  }
+  function isItemPath(path) {
+    return /^\/itm\/[0-9a-f-]+(?:\/(?:external|research))?\/?$/i.test(path);
+  }
   function identityMatches(raw,ctx) {
+    raw=normalizeAltLabel(raw);
     const title=identityTitle(ctx);
     const subject=coreSubject(title)||String(ctx.subject||'').trim();
     const number=(title.match(/#\s*0*(\d{1,4})\b/i)||[])[1];
@@ -103,7 +110,7 @@
     const unlimited=/\bunlimited\b/i;
     if(edition.test(title)!==edition.test(raw)||unlimited.test(title)!==unlimited.test(raw)) return false;
     const prefix=title.split(/#\s*\d/)[0];
-    const setWords=words(prefix).filter(w=>! /^(pokemon|japanese|english|korean|chinese|tcg|card|and|sword|shield|\d{4}|sv\d+[a-z]?|s\d+[a-z]?)$/.test(w));
+    const setWords=words(prefix).filter(w=>! /^(pokemon|japanese|english|korean|chinese|tcg|card|and|sword|shield|\d{4}|sv\d+[a-z]?|s\d+[a-z]?|m\d+[a-z]?)$/.test(w));
     return setWords.every(w=>actual.has(w));
   }
 
@@ -111,6 +118,7 @@
   // ALT sometimes omits the set/edition text in a result tile.
   // Keep plausible results for detail inspection; never use this alone to write prices.
   function candidateIdentityMatches(raw,ctx) {
+    raw=normalizeAltLabel(raw);
     if(identityMatches(raw,ctx)) return true;
     const title=identityTitle(ctx);
     const subject=coreSubject(title)||String(ctx.subject||'').trim();
@@ -134,19 +142,19 @@
     const found=new Map();
     for(const el of document.querySelectorAll('a[href*="/itm/"],button,[role="button"],[role="row"],[role="option"],[tabindex],div,tr')) {
       if(!visible(el)||el===b||el.closest('header,nav,aside,footer')) continue;
-      const raw=[el.innerText,el.getAttribute('aria-label'),el.title,...[...el.querySelectorAll('img[alt]')].map(img=>img.alt)].filter(Boolean).join(' ').trim();
+      const raw=normalizeAltLabel([el.innerText,el.getAttribute('aria-label'),el.title,...[...el.querySelectorAll('img[alt]')].map(img=>img.alt)].filter(Boolean).join(' '));
       if(!raw||raw.length>500||!candidateIdentityMatches(raw,ctx)) continue;
       let path='';
       const anchor=el.matches('a[href]')?el:el.querySelector('a[href*="/itm/"]');
       if(anchor) {
         try {
           const u=new URL(anchor.href);
-          if(u.origin!==location.origin||!/^\/itm\/[0-9a-f-]+\/(?:external|research)\/?$/i.test(u.pathname)) continue;
+          if(u.origin!==location.origin||!isItemPath(u.pathname)) continue;
           path=u.pathname;
         } catch (_) { continue; }
       }
       if(!path && (!/^(?:19|20)\d{2}\b/.test(String(el.innerText||'').trim()) || (!el.matches('button,[role="button"],[role="row"],[role="option"],[tabindex],tr') && getComputedStyle(el).cursor!=='pointer'))) continue;
-      const key=path?path.replace(/\/(?:external|research)\/?$/,''):norm(raw);
+      const key=path?path.replace(/\/(?:external|research)\/?$/,'').replace(/\/$/,''):norm(normalizeAltLabel(raw));
       const previous=found.get(key);
       if(!previous||previous.link.contains(el)||(path && identityMatches(String(el.innerText||''),ctx) && !identityMatches(String(previous.link.innerText||''),ctx))) found.set(key,{link:el,title:raw,path,numberVerified:true});
     }
@@ -156,7 +164,7 @@
     const gradeRe=new RegExp('\\b'+ctx.grade.replace(/\s+/g,'\\s+')+'(?![.\\d])','i');
     const results=new Map();
     for(const item of items) {
-      const label=String(item.link.innerText||'').replace(/\s+/g,' ').trim();
+      const label=normalizeAltLabel(item.link.innerText);
       // A card image might carry the title/grade only in alt text. In all cases re-check on detail.
       const evidence=candidateIdentityMatches(label,ctx)?label:item.title;
       if(item.path && (!candidateIdentityMatches(evidence,ctx)||(/\b(?:PSA|CGC|BGS|SGC|TAG)\s+\d+(?:\.\d+)?\b/i.test(evidence)&&!gradeRe.test(evidence)))) continue;
@@ -243,7 +251,7 @@
     const year=(full.match(/\b(?:19|20)\d{2}\b/)||[])[0];
     if(!subject||!number||!year) { report(ctx,false,'PSAカード名・年・型番を取得できません。'); return; }
     // Full PSA labels contain PSA-only codes and repeated variety names.
-    const setName=full.split(/#\s*\d/)[0].replace(/^\s*(?:19|20)\d{2}\s*/,'').replace(/\b(?:pokemon|japanese|korean|english|chinese|tcg|sword|shield|scarlet|violet|and|sv\d+[a-z]?|s\d+[a-z]?)\b/ig,' ').replace(/[^\p{L}\p{N}\s]+/gu,' ').replace(/\s+/g,' ').trim();
+    const setName=full.split(/#\s*\d/)[0].replace(/^\s*(?:19|20)\d{2}\s*/,'').replace(/\b(?:pokemon|japanese|korean|english|chinese|tcg|sword|shield|scarlet|violet|and|sv\d+[a-z]?|s\d+[a-z]?|m\d+[a-z]?)\b/ig,' ').replace(/[^\p{L}\p{N}\s]+/gu,' ').replace(/\s+/g,' ').trim();
     const queries=[/25TH ANNIVERSARY GOLDEN BOX/i.test(full) ? subject+' Golden Box' : subject+' '+number.padStart(3,'0'),subject+' '+number,subject+' '+setName,subject].filter(x=>x.trim());
     ctx.queries=[...new Set(queries.map(x=>x.trim()))];
     const query=ctx.queries[ctx.queryIndex||0]||ctx.queries[0];
@@ -441,7 +449,7 @@
 
   async function autoResearch() {
     const ctx=readContext();
-    if(!ctx || !/^\/itm\/[0-9a-f-]+\/(?:research|external)\/?$/i.test(location.pathname)) return;
+    if(!ctx || !isItemPath(location.pathname)) return;
     if(ctx.route==='browse') { ctx.route='opening'; saveContext(ctx); }
     if(ctx.route!=='opening' && ctx.route!=='research') return;
     if(ctx.route==='research' && ctx.researchPath!==location.pathname) return;
