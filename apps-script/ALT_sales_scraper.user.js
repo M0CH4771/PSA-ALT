@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PSA-ALT Cert Search and Sales Copier
 // @namespace    M0CH4771.PSA-ALT
-// @version      3.8.0
+// @version      3.9.0
 // @description  Navigates ALT search by the PSA card title, verifies grade from the matched item title, and returns confirmed sales to the batch app.
 // @match        https://alt.xyz/browse*
 // @match        https://alt.xyz/itm/*/research*
@@ -211,53 +211,73 @@
     return false;
   }
   function transactionsRoot() {
-    const hasSaleLinks = el => el.querySelectorAll('a[href*="/itm/"],a[href*="/sold/"],a[href*="ebay.com/itm/"]').length > 0;
-    const titlePattern = /market\\s+transactions|sales\\s+history/i;
+    const titlePattern = /market\s+transactions|sales\s+history/i;
     const isVisible = el => {
       const style=getComputedStyle(el);
       return style.display!=='none' && style.visibility!=='hidden' && el.getClientRects().length>0;
     };
 
-    // ALT renders "Market transactions" inside a right-side MUI drawer. Its
-    // exact parent depth can change, so find the nearest visible drawer/dialog
-    // containing both the title and sale links first.
-    const overlays=[...document.querySelectorAll('[role="dialog"],[aria-modal="true"],.MuiDrawer-paper,.MuiDrawer-root')];
+    // ALT opens Sales History as a drawer. Do not require transaction links:
+    // on some item pages, transaction rows are clickable divs rather than anchors.
+    const overlays=[...document.querySelectorAll('[role="dialog"],[aria-modal="true"],.MuiDrawer-paper,.MuiDrawer-root,aside')]
+      .filter(isVisible);
     for(const overlay of overlays) {
-      if(!isVisible(overlay) || !titlePattern.test(overlay.innerText||'')) continue;
-      if(hasSaleLinks(overlay)) return overlay;
+      if(titlePattern.test(overlay.innerText||'')) return overlay;
     }
 
     const headings=[...document.querySelectorAll('h1,h2,h3,h4,[role="heading"]')]
-      .filter(el=>titlePattern.test((el.innerText||'').replace(/\\s+/g,' ').trim()));
+      .filter(el=>titlePattern.test((el.innerText||'').replace(/\s+/g,' ').trim()));
     for(const heading of headings) {
       let node=heading;
       for(let depth=0;node&&depth<14;depth++,node=node.parentElement) {
-        if(!titlePattern.test(node.innerText||'')) continue;
-        if(hasSaleLinks(node)) return node;
+        if(titlePattern.test(node.innerText||'') && isVisible(node)) return node;
       }
     }
     return null;
   }
   function parseRows(root) {
     const seen=new Set(), out=[];
-    for(const a of root.querySelectorAll('a[href]')) {
-      const href=a.href||'', text=(a.innerText||'').replace(/\u00a0/g,' ').trim();
-      if(!text||!/(?:\/itm\/|\/sold\/|ebay\.com\/itm\/)/i.test(href)||/listing\s*price|relisted|not\s*paid|unsold|alt\s*value/i.test(text)) continue;
+    const methodRe=/^(auction|buy now|best offer|fixed price|sale)$/i;
+    const dateRe=/^(?:[A-Z][a-z]{2,8}\s+\d{1,2},?\s+\d{4}|\d{4}-\d{2}-\d{2})$/;
+    const moneyRe=/^\$\s?[\d,]+(?:\.\d{1,2})?$/;
+    const rowData=el=>{
+      const text=(el.innerText||el.textContent||'').replace(/\u00a0/g,' ').trim();
+      if(!text||/listing\s*price|relisted|not\s*paid|unsold|alt\s*value/i.test(text)) return null;
       const lines=text.split(/\n+/).map(x=>x.trim()).filter(Boolean);
-      const method=lines.find(x=>/^(auction|buy now|best offer|fixed price|sale)$/i.test(x));
-      // Best Offer rows do not reliably expose the accepted offer amount; never use a displayed listing amount.
-      if(!method || /^best offer$/i.test(method)) continue;
-      const dateText=lines.find(x=>/^(?:[A-Z][a-z]{2,8}\s+\d{1,2},?\s+\d{4}|\d{4}-\d{2}-\d{2})$/.test(x));
-      const money=lines.find(x=>/^\$\s?[\d,]+(?:\.\d{1,2})?$/.test(x));
-      if(!dateText||!money) continue;
+      const methodLine=lines.find(x=>methodRe.test(x));
+      const methodMatch=text.match(/\b(auction|buy now|best offer|fixed price|sale)\b/i);
+      const method=methodLine||methodMatch?.[1]||'';
+      // Best Offer is excluded unless ALT exposes a distinct confirmed sale amount.
+      if(!method||/^best offer$/i.test(method)) return null;
+      const dateLine=lines.find(x=>dateRe.test(x));
+      const dateMatch=text.match(/\b(?:[A-Z][a-z]{2,8}\s+\d{1,2},?\s+\d{4}|\d{4}-\d{2}-\d{2})\b/);
+      const dateText=dateLine||dateMatch?.[0]||'';
+      const moneyLine=lines.find(x=>moneyRe.test(x));
+      const moneyMatch=text.match(/\$\s?[\d,]+(?:\.\d{1,2})?/);
+      const money=moneyLine||moneyMatch?.[0]||'';
+      if(!dateText||!money) return null;
       const d=new Date(dateText), price=Number(money.replace(/[$,\s]/g,''));
-      if(!Number.isFinite(d.getTime())||!Number.isFinite(price)||price<=0) continue;
+      if(!Number.isFinite(d.getTime())||!Number.isFinite(price)||price<=0) return null;
+      return {date:d,price,method,text};
+    };
+    const candidates=[...root.querySelectorAll('a[href],[role="link"],li,article,button,div')];
+    const valid=candidates.filter(el=>el.getClientRects().length&&rowData(el));
+    // Use the innermost element that contains a complete sale record to avoid
+    // counting the drawer and its row wrappers as separate transactions.
+    const rows=valid.filter(el=>![...el.querySelectorAll('a[href],[role="link"],li,article,button,div')].some(child=>rowData(child)));
+    for(const el of rows) {
+      const parsed=rowData(el);
+      if(!parsed) continue;
+      const a=el.closest('a[href]')||(el.matches('a[href]')?el:el.querySelector('a[href]'));
+      const href=a?.href||'';
       const ebayId=(href.match(/ebay\.com\/itm\/(\d{9,15})/i)||[])[1];
-      const key=ebayId?`ebay:${ebayId}`:href;
+      const key=ebayId?'ebay:'+ebayId:href?href:el;
       if(seen.has(key)) continue;
       seen.add(key);
-      let site='ALT'; try { site=a.querySelector('img[alt]')?.alt?.trim()||new URL(href).hostname.replace(/^www\./,''); } catch (_) {}
-      out.push({ date:`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`, price, site, href, method });
+      const imgAlt=el.querySelector('img[alt]')?.alt?.trim()||'';
+      let site=imgAlt||(/card\s*hobby/i.test(parsed.text)?'Card Hobby':/ebay/i.test(parsed.text)?'eBay':'ALT');
+      if(!imgAlt&&href) { try { site=new URL(href).hostname.replace(/^www\./,''); } catch (_) {} }
+      out.push({date:parsed.date.toISOString().slice(0,10),price:parsed.price,site,href,method:parsed.method});
     }
     return out.sort((a,b)=>b.date.localeCompare(a.date));
   }
