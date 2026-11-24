@@ -60,7 +60,7 @@
   b.hidden=/^\/browse\/?$/.test(location.pathname);
 
   function compact(value) {
-    return norm(value).normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9#]+/g,'');
+    return norm(value).normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/[^\\p{L}\\p{N}#]+/gu,'');
   }
   function candidateItems(ctx) {
     const subject=String(ctx.subject||ctx.cardName||'').trim();
@@ -150,7 +150,7 @@
       return;
     }
 
-    const candidates=await waitForCandidates(15000,ctx);
+    const candidates=await waitForCandidates(30000,ctx);
     if(candidates.length) {
       const bestScore=candidates[0].score;
       const best=candidates.filter(item=>item.score===bestScore);
@@ -334,7 +334,7 @@
     });
     if(!opened) { report(ctx,false,'ALTの成約履歴欄が見つかりません。'); return; }
     if(opened!=='already-open' && !(await openTransactions())) { report(ctx,false,'ALTの「Recent Transactions → VIEW ALL」を見つけられませんでした。'); return; }
-    const root=await waitFor(transactionsRoot,15000);
+    const root=await waitFor(transactionsRoot,30000);
     if(!root) { report(ctx,false,'Sales Historyを開けませんでした。'); return; }
     let rows=parseRows(root);
     for(let i=0;rows.length<2&&i<5;i++) {
