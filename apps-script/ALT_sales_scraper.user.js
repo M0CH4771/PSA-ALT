@@ -1,12 +1,12 @@
 // ==UserScript==
 // @name         PSA-ALT Cert Search and Sales Copier
 // @namespace    M0CH4771.PSA-ALT
-// @version      3.0.0
+// @version      3.1.0
 // @description  Searches ALT by PSA cert, selects the exact grade, and returns confirmed sales to the batch app.
 // @match        https://alt.xyz/browse*
 // @match        https://alt.xyz/itm/*/research*
 // @run-at       document-idle
-// @grant        none
+// @grant        GM_setValue
 // ==/UserScript==
 (() => {
   'use strict';
@@ -30,13 +30,15 @@
   const saveContext = c => sessionStorage.setItem(STORAGE_KEY,JSON.stringify(c));
   function report(ctx, ok, reason='', sales=[]) {
     say(ok ? `ALT成約をWebアプリへ返しました (${sales.length}件)。` : `保留: ${reason}`);
-    if (!ctx?.batch || !ctx.nonce || !window.opener) return;
-    window.opener.postMessage({
+    if (!ctx?.batch || !ctx.nonce) return;
+    const message = {
       type:'PSA_ALT_BATCH_RESULT', nonce:ctx.nonce, cert:ctx.cert, grade:ctx.grade,
       ok, reason, title:ctx.altTitle||document.querySelector('h1')?.innerText||document.title,
       url:location.href,
       sales:sales.map(x=>({date:x.date,price:x.price,site:x.site,url:x.href}))
-    }, '*');
+    };
+    try { GM_setValue('PSA_ALT_BATCH_RESULT',{id:Date.now(),message}); } catch (_) {}
+    try { if(window.opener) window.opener.postMessage(message,'*'); } catch (_) {}
   }
 
   function captureSearchRequest() {
@@ -98,17 +100,37 @@
     while(Date.now()<end) { const v=fn(); if(v) return v; await sleep(250); }
     return null;
   }
+  function viewAllControls(root) {
+    return [...root.querySelectorAll('button,[role="button"],a')]
+      .filter(el=>/^(view all|see all|view all transactions|see all transactions)$/i.test(norm(el.innerText||el.getAttribute('aria-label'))));
+  }
   function recentTransactionsHeading() {
-    return [...document.querySelectorAll('h1,h2,h3,h4,[role="heading"]')].find(el=>/recent transactions/i.test((el.innerText||'').trim()));
+    const candidates=[...document.querySelectorAll('h1,h2,h3,h4,[role="heading"],button,[role="button"],a,span,p,div')]
+      .filter(el=>/recent transactions/i.test(norm(el.innerText||el.getAttribute('aria-label'))))
+      .sort((a,b)=>(a.innerText||'').length-(b.innerText||'').length);
+    for(const candidate of candidates) {
+      let node=candidate;
+      for(let i=0;node&&i<10;i++,node=node.parentElement) {
+        if(/recent transactions/i.test(norm(node.innerText||'')) && viewAllControls(node).length) return node;
+      }
+    }
+    return candidates[0]||null;
   }
   async function openTransactions() {
+    const direct=viewAllControls(document);
+    for(const control of direct) {
+      let node=control;
+      for(let i=0;node&&i<10;i++,node=node.parentElement) {
+        if(/recent transactions/i.test(norm(node.innerText||''))) { control.click(); return true; }
+      }
+    }
     const heading=recentTransactionsHeading();
     if(!heading) return false;
     let node=heading;
-    for(let i=0;node&&i<8;i++,node=node.parentElement) {
-      if(!/recent transactions/i.test(node.innerText||'')) continue;
-      const button=[...node.querySelectorAll('button')].find(x=>(x.innerText||'').trim().toLowerCase()==='view all');
-      if(button) { button.click(); return true; }
+    for(let i=0;node&&i<10;i++,node=node.parentElement) {
+      if(!/recent transactions/i.test(norm(node.innerText||''))) continue;
+      const control=viewAllControls(node)[0];
+      if(control) { control.click(); return true; }
     }
     return false;
   }
