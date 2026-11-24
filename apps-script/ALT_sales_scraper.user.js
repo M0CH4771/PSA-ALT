@@ -60,7 +60,7 @@
   b.hidden=/^\/browse\/?$/.test(location.pathname);
 
   function compact(value) {
-    return norm(value).normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/[^\\p{L}\\p{N}#]+/gu,'');
+    return norm(value).normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/[^\p{L}\p{N}#]+/gu,'');
   }
   function candidateItems(ctx) {
     const subject=String(ctx.subject||ctx.cardName||'').trim();
@@ -331,7 +331,7 @@
     const opened=await waitFor(()=>{
       if(transactionsRoot()) return 'already-open';
       return recentTransactionsHeading()?'ready':null;
-    });
+    },25000);
     if(!opened) { report(ctx,false,'ALTの成約履歴欄が見つかりません。'); return; }
     if(opened!=='already-open' && !(await openTransactions())) { report(ctx,false,'ALTの「Recent Transactions → VIEW ALL」を見つけられませんでした。'); return; }
     const root=await waitFor(transactionsRoot,30000);
