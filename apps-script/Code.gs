@@ -302,7 +302,7 @@ function isPsaImageUrl_(value) {
 
 function isAltResearchUrl_(value) {
   // Current ALT product pages may use either the research or external route.
-  return /^https:\/\/alt\.xyz\/itm\/[0-9a-f-]+\/(?:research|external)\/?(?:[?#].*)?$/i.test(String(value || '').trim());
+  return /^https:\/\/alt\.xyz\/itm\/[0-9a-f-]+(?:\/(?:research|external))?\/?(?:[?#].*)?$/i.test(String(value || '').trim());
 }
 
 function saleNote_(label, sale, grade) {
