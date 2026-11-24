@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PSA Cert Reader for PSA-ALT
 // @namespace    M0CH4771.PSA-ALT
-// @version      1.0.0
+// @version      1.1.0
 // @description  Reads the visible PSA certification page and returns its cert, subject, grade, and official image to the batch app.
 // @match        https://www.psacard.com/cert/*
 // @run-at       document-idle
@@ -13,9 +13,11 @@
   window.__psaAltCertReader = true;
 
   const params = new URLSearchParams(location.search);
-  const cert = String(params.get('psaCert') || '').replace(/\D/g, '');
-  const nonce = String(params.get('psaNonce') || '');
-  if (params.get('psaBatch') !== '1' || !/^\d{6,12}$/.test(cert) || !/^[\w-]{10,100}$/.test(nonce)) return;
+  const hashParams = new URLSearchParams(location.hash.replace(/^#/, ''));
+  const cert = String(params.get('psaCert') || hashParams.get('psaCert') || '').replace(/\D/g, '');
+  const nonce = String(params.get('psaNonce') || hashParams.get('psaNonce') || '');
+  const batch = params.get('psaBatch') || hashParams.get('psaBatch');
+  if (batch !== '1' || !/^\d{6,12}$/.test(cert) || !/^[\w-]{10,100}$/.test(nonce)) return;
 
   const box = document.createElement('div');
   Object.assign(box.style, {position:'fixed',right:'18px',bottom:'18px',zIndex:'2147483647',maxWidth:'420px',padding:'12px 16px',borderRadius:'8px',background:'#13233a',color:'#fff',font:'14px/1.5 system-ui',boxShadow:'0 3px 12px #0005'});
@@ -34,7 +36,7 @@
     if (pathCert !== cert) return null;
     const body = clean(document.body?.innerText || '').replace(/\n{2,}/g,'\n');
     if (!body.includes(cert)) return null;
-    const gradeMatch = body.match(/Item\s+Grade\s+(GEM\s*MT|MINT|NM-MT|EX-MT|EX|VG-EX|VG|GOOD|FAIR|POOR)\s*(\d+(?:\.5)?)/i);
+    const gradeMatch = body.match(/Item\s*Grade\s*(?:\/\s*)?(GEM\s*MT|MINT|NM-MT|EX-MT|EX|VG-EX|VG|GOOD|FAIR|POOR)\s*(\d+(?:\.5)?)/i);
     const subjectMatch = body.match(/(?:^|\n)Subject\s*\n\s*([^\n]+)/i) || body.match(/Subject\s+([^\n]+)/i);
     let name = subjectMatch ? clean(subjectMatch[1]) : '';
     if (!name) {
@@ -48,8 +50,15 @@
       const candidate = new URL(img?.currentSrc || img?.src || '', location.href);
       if (candidate.protocol==='https:' && /(^|\.)psacard\.com$/i.test(candidate.hostname)) imageUrl=candidate.href;
     } catch (_) {}
+    const cardNumberMatch = body.match(/(?:Card\s*(?:No\.?|Number)|Number)\s*\n?\s*#?([^\n]+)/i);
+    const yearMatch = body.match(/(?:Year)\s*\n?\s*([^\n]+)/i);
+    const brandMatch = body.match(/(?:Brand|Set)\s*\n?\s*([^\n]+)/i);
+    const varietyMatch = body.match(/(?:Variety|Pedigree)\s*\n?\s*([^\n]+)/i);
+    const searchName = [yearMatch?.[1], brandMatch?.[1], name, cardNumberMatch?.[1] ? '#' + clean(cardNumberMatch[1]).replace(/^#/, '') : '', varietyMatch?.[1]]
+      .map(clean).filter(Boolean).join(' ').replace(/\s+/g,' ').trim();
     return {
       name,
+      fullName: searchName || name,
       grade:`PSA ${Number(gradeMatch[2])}`,
       imageUrl,
       url:`https://www.psacard.com/cert/${cert}/psa`
