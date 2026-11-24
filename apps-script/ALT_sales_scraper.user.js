@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PSA-ALT Cert Search and Sales Copier
 // @namespace    M0CH4771.PSA-ALT
-// @version      3.13.0
+// @version      3.14.0
 // @updateURL    https://raw.githubusercontent.com/M0CH4771/PSA-ALT/main/apps-script/ALT_sales_scraper.user.js
 // @downloadURL  https://raw.githubusercontent.com/M0CH4771/PSA-ALT/main/apps-script/ALT_sales_scraper.user.js
 // @description  Searches ALT by PSA card name, confirms exact card number and grade, and copies only verified sales.
@@ -26,6 +26,8 @@
   document.body.appendChild(toast);
   let timer;
   let runningFor = '';
+  let activePhase = '';
+  function phase(label) { activePhase=label; say(label); }
   const say = s => { toast.textContent=s; toast.style.display='block'; clearTimeout(timer); timer=setTimeout(()=>toast.style.display='none',10000); };
   const sleep = ms => new Promise(resolve=>setTimeout(resolve,ms));
   const norm = s => String(s||'').replace(/\s+/g,' ').trim().toLowerCase();
@@ -273,8 +275,32 @@
     openCandidate(ctx,candidates[0]);
   }
 
+  function canonicalGrade(value) {
+    const match=norm(value).match(/^(psa|cgc|bgs|sgc|tag)\s*(\d+(?:\.\d+)?)$/i);
+    return match?match[1].toLowerCase()+' '+Number(match[2]):'';
+  }
   function currentGradeButton() {
-    return [...document.querySelectorAll('button')].find(el=>/^PSA\s+\d+(?:\.\d+)?$/i.test((el.innerText||'').trim()));
+    return [...document.querySelectorAll('main button,main [role="button"],main [aria-haspopup]')]
+      .find(el=>visible(el)&&/^psa \d/.test(canonicalGrade(el.innerText||el.getAttribute('aria-label'))));
+  }
+  function displayedGrade() {
+    const button=currentGradeButton();
+    if(button) return canonicalGrade(button.innerText||button.getAttribute('aria-label'));
+    const main=document.querySelector('main');
+    const beforePopulation=String(main?.innerText||'').split(/(?:PSA|CGC|BGS)\s+population|Recent transactions|Similar listings/i)[0];
+    const match=beforePopulation.match(/\b(PSA|CGC|BGS|SGC|TAG)\s*(\d+(?:\.\d+)?)\b/i);
+    return match?canonicalGrade(match[0]):'';
+  }
+  function detailTitle(ctx) {
+    const main=document.querySelector('main');
+    if(!main) return null;
+    const headings=[...main.querySelectorAll('h1,h2,[role="heading"]')];
+    const eligible=el=>visible(el)&&!el.closest('aside,[role="dialog"]')&&String(el.innerText||'').trim().length<300;
+    const match=headings.filter(eligible).map(el=>String(el.innerText||'').trim()).find(t=>identityMatches(t,ctx));
+    if(match) return match;
+    // Some layouts have a plain text title rather than an h1/h2.
+    const recent=recentTransactionsHeading();
+    return [...main.querySelectorAll('p,span,div')].filter(el=>eligible(el)&&(!recent||!!(el.compareDocumentPosition(recent)&Node.DOCUMENT_POSITION_FOLLOWING))).map(el=>String(el.innerText||'').trim()).find(t=>t.length<250&&identityMatches(t,ctx))||null;
   }
   async function waitFor(fn, ms=12000) {
     const end=Date.now()+ms;
@@ -399,9 +425,8 @@
     const key=`research:${location.pathname}:${ctx.grade}`;
     if(runningFor===key) return;
     runningFor=key;
-    say(`ALTカード: ${ctx.altTitle||'鑑定番号検索結果'}\nPSA ${ctx.grade} の履歴を準備しています…`);
-
-    const titleText=await waitFor(()=>[...document.querySelectorAll('h1,h2,[role="heading"]')].map(el=>String(el.innerText||'')).find(t=>identityMatches(t,ctx)),15000);
+    phase(marketTitleVisible()?'Market transactionsは開いています。カード情報を照合中…':'ALTカード詳細を照合中…');
+    const titleText=await waitFor(()=>detailTitle(ctx),12000);
     if(!titleText) { retryCandidate(ctx,'ALTカード詳細でカード名・型番・セット・言語・版を照合できません。'); return; }
     const subject=coreSubject(identityTitle(ctx))||String(ctx.subject||ctx.cardName||'').trim();
     const subjectTerms=norm(subject).replace(/[^\p{L}\p{N}#']+/gu,' ').split(/\s+/).filter(x=>x.length>1&&!/^(pokemon|japanese|english|card|psa|gem|mt|super|rare|ultra|full|art)$/i.test(x));
@@ -420,42 +445,37 @@
       retryCandidate(ctx,'ALT商品ページでカード番号を確認できません。誤入力防止のため保留しました。');
       return;
     }
-    // External listing pages expose PSA and grade as adjacent visible text,
-    // whereas research pages expose a PSA grade dropdown button.
-    function displayedGrade() {
-      const button=currentGradeButton();
-      if(button) return norm(button.innerText);
-      const main=document.querySelector('main');
-      const beforePopulation=String(main?.innerText||'').split(/PSA population/i)[0];
-      const match=beforePopulation.match(/\b(PSA|CGC|BGS)\s+(\d+(?:\.\d+)?)\b/i);
-      return match?norm(match[0]):'';
-    }
+    phase('カード一致。'+ctx.grade+' のグレードを照合中…');
     const gradeState=await waitFor(displayedGrade);
     const gradeButton=currentGradeButton();
-    if(!gradeButton && gradeState!==norm(ctx.grade)) { retryCandidate(ctx,'ALT商品詳細のPSAグレードが一致しません。'); return; }
-    if(gradeButton && norm(gradeButton.innerText)!==norm(ctx.grade)) {
+    if(!gradeButton && gradeState!==canonicalGrade(ctx.grade)) { retryCandidate(ctx,'ALT商品詳細のPSAグレードが一致しません。'); return; }
+    if(gradeButton && canonicalGrade(gradeButton.innerText||gradeButton.getAttribute('aria-label'))!==canonicalGrade(ctx.grade)) {
+      phase('ALTで'+ctx.grade+' を選択中…');
       gradeButton.click();
-      const menuItem=await waitFor(()=>[...document.querySelectorAll('[role="menuitem"],button,[role="option"]')].find(el=>norm(el.innerText)===norm(ctx.grade)));
+      const menuItem=await waitFor(()=>[...document.querySelectorAll('[role="menuitem"],button,[role="option"]')].find(el=>visible(el)&&canonicalGrade(el.innerText||el.getAttribute('aria-label'))===canonicalGrade(ctx.grade)));
       if(!menuItem) { retryCandidate(ctx,ctx.grade+'の選択肢がALTにありません。'); return; }
       menuItem.click();
-      const selected=await waitFor(()=>{ const el=currentGradeButton(); return el&&norm(el.innerText)===norm(ctx.grade)?el:null; });
+      const selected=await waitFor(()=>{ const el=currentGradeButton(); return el&&canonicalGrade(el.innerText||el.getAttribute('aria-label'))===canonicalGrade(ctx.grade)?el:null; });
       if(!selected) { retryCandidate(ctx,'ALTでPSA '+ctx.grade+'を選択できませんでした。'); return; }
     }
 
+    phase(marketTitleVisible()?'Market transactionsを検出。成約行を読み込み中…':'カード・グレード一致。Recent transactionsを確認中…');
     const opened=await waitFor(()=>{
       if(marketTitleVisible()) return 'already-open';
       return recentTransactionsHeading()?'ready':null;
     },25000);
     if(!opened) { retryCandidate(ctx,'ALTの成約履歴欄が見つかりません。'); return; }
     if(opened!=='already-open' && !(await openTransactions())) { retryCandidate(ctx,'ALTの「Recent Transactions → VIEW ALL」を見つけられませんでした。'); return; }
+    phase('Market transactionsを検出中…');
     let root=await waitFor(transactionsRoot,15000);
     if(!root) { retryCandidate(ctx,marketTitleVisible()?'Market transactionsは表示済みですが、成約行の読み込みを確認できませんでした。':'Market transactionsを開けませんでした。'); return; }
     let rows=[];
+    phase('Market transactionsを検出。成約2件を読み込み中…');
     // React can replace the drawer while transactions load. Resolve it again
     // on every poll, and wait for two records rather than the first row.
     await waitFor(()=>{
       const fresh=transactionsRoot();
-      if(fresh) { root=fresh; rows=parseRows(root); }
+      if(fresh) { root=fresh; const before=rows.length; rows=parseRows(root); if(rows.length!==before) phase('成約を読み込み中… '+rows.length+'件取得'); }
       return rows.length>=2?rows:null;
     },12000);
     for(let i=0;rows.length<2&&i<5;i++) {
@@ -464,7 +484,8 @@
       more.click(); await sleep(700); root=transactionsRoot()||root; rows=parseRows(root);
     }
     if(rows.length<2) { retryCandidate(ctx,`同一条件の有効成約が${rows.length}件です。2件そろわないため価格を記入しません。`); return; }
-    if(displayedGrade()!==norm(ctx.grade)) { retryCandidate(ctx,'成約取得後のPSAグレードが一致しません。'); return; }
+    phase('成約2件取得。PSAグレードを最終確認中…');
+    if(displayedGrade()!==canonicalGrade(ctx.grade)) { retryCandidate(ctx,'成約取得後のPSAグレードが一致しません。'); return; }
     ctx.altTitle=titleText;
     if(ctx.batch) { report(ctx,true,'',rows.slice(0,2)); sessionStorage.removeItem(STORAGE_KEY); b.hidden=true; return; }
     b.dataset.payload=[
@@ -508,7 +529,7 @@
   let lastPath=location.pathname;
   setInterval(()=>{
     if(location.pathname!==lastPath) { lastPath=location.pathname; runningFor=''; b.hidden=/^\/browse\/?$/.test(location.pathname); }
-    if(/^\/browse\/?$/.test(location.pathname)) openSingleCertCandidate();
-    else autoResearch();
+    const task=/^\/browse\/?$/.test(location.pathname)?openSingleCertCandidate():autoResearch();
+    task.catch(error=>{ const ctx=readContext(); if(ctx) { const reason=(activePhase||'ALT処理')+'でエラー: '+(error?.message||String(error)); if(/^\/browse\/?$/.test(location.pathname)) report(ctx,false,reason); else retryCandidate(ctx,reason); } });
   },500);
 })();
