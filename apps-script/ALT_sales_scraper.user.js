@@ -75,7 +75,7 @@
   }
 
   async function submitCertSearch(input, cert) {
-    const current=String(input.value||'').replace(/\\D/g,'');
+    const current=String(input.value||'').replace(/\D/g,'');
     if(current!==cert) {
       const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')?.set;
       if(setter) setter.call(input,cert); else input.value=cert;
