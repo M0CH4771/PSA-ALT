@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         PSA-ALT Cert Search and Sales Copier
 // @namespace    M0CH4771.PSA-ALT
-// @version      3.9.3
+// @version      3.9.4
 // @updateURL    https://raw.githubusercontent.com/M0CH4771/PSA-ALT/main/apps-script/ALT_sales_scraper.user.js
 // @downloadURL  https://raw.githubusercontent.com/M0CH4771/PSA-ALT/main/apps-script/ALT_sales_scraper.user.js
-// @description  Navigates ALT search by the PSA card title, verifies grade from the matched item title, and returns confirmed sales to the batch app.
+// @description  Searches ALT by PSA card name, confirms exact card number and grade, and copies only verified sales.
 // @match        https://alt.xyz/browse*
 // @match        https://alt.xyz/itm/*/research*
 // @match        https://alt.xyz/itm/*/external*
@@ -59,9 +59,12 @@
 
   b.hidden=/^\/browse\/?$/.test(location.pathname);
 
+  function compact(value) {
+    return norm(value).normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9#]+/g,'');
+  }
   function candidateItems(ctx) {
-    const subject=norm(ctx.subject||'').replace(/^(?:fa|full art)\s*\/\s*/,'');
-    const grade=norm(ctx.grade).replace(/\s+/g,'');
+    const subject=String(ctx.subject||ctx.cardName||'').trim();
+    const subjectTerms=norm(subject).replace(/[^\p{L}\p{N}#']+/gu,' ').split(/\s+/).filter(x=>x.length>1&&!/^(pokemon|japanese|english|card|psa|gem|mt|super|rare|ultra|full|art)$/i.test(x));
     const number=(ctx.cardName.match(/#\s*0*(\d{1,4})/i)||[])[1]||'';
     const language=(ctx.cardName.match(/\b(japanese|korean|english|chinese|mandarin|cantonese|thai|indonesian|german|french|italian|spanish)\b/i)||[])[1]||'';
     const byPath=new Map();
@@ -71,18 +74,20 @@
       if(!/^\/itm\/[0-9a-f-]+\/external\/?$/i.test(url.pathname)) continue;
       const imageText=[...link.querySelectorAll('img[alt]')].map(img=>img.alt||'').join(' ');
       const raw=[link.innerText,link.getAttribute('aria-label'),link.title,imageText].join(' ');
-      const text=norm(raw);
-      if(subject&&!text.includes(subject)) continue;
-      if(grade&&!text.replace(/\s+/g,'').includes(grade)) continue;
-      if(number&&!new RegExp('#\\s*0*'+number+'(?:\\D|$)','i').test(raw)) continue;
-      if(language&&!text.includes(language.toLowerCase())) continue;
+      const compactText=compact(raw);
+      if(subjectTerms.length && !subjectTerms.every(term=>compactText.includes(compact(term)))) continue;
+      const numbers=[...raw.matchAll(/#\s*0*(\d{1,4})\b/g)].map(m=>String(Number(m[1])));
+      if(number && numbers.length && !numbers.includes(String(Number(number)))) continue;
+      const languages=[...raw.matchAll(/\b(japanese|korean|english|chinese|mandarin|cantonese|thai|indonesian|german|french|italian|spanish)\b/ig)].map(m=>m[1].toLowerCase());
+      if(language && languages.length && !languages.includes(language.toLowerCase())) continue;
       const path=url.pathname;
+      const score=(number && numbers.includes(String(Number(number)))?4:0)+(language && languages.includes(language.toLowerCase())?2:0);
       const previous=byPath.get(path);
-      if(!previous || String(link.innerText||'').length>String(previous.link.innerText||'').length) {
-        byPath.set(path,{link,title:String(link.innerText||link.getAttribute('aria-label')||link.title||imageText||'').trim(),path});
+      if(!previous || score>previous.score || String(link.innerText||'').length>String(previous.link.innerText||'').length) {
+        byPath.set(path,{link,title:String(link.innerText||link.getAttribute('aria-label')||link.title||imageText||'').trim(),path,score,numberVerified:!!(number&&numbers.includes(String(Number(number))))});
       }
     }
-    return [...byPath.values()];
+    return [...byPath.values()].sort((a,b)=>b.score-a.score);
   }
 
   function browseSearchInput() {
@@ -121,13 +126,13 @@
     const ctx=readContext();
     if (!ctx || !/^\/browse\/?$/.test(location.pathname)) return;
     const route=ctx.route||'browse';
-    if(!['browse','name-search','cert-search'].includes(route)) return;
+    if(!['browse','name-search'].includes(route)) return;
     const runKey='browse:'+ctx.cert+':'+route;
     if(runningFor===runKey) return;
     runningFor=runKey;
 
-    function navigateSearch(query,nextRoute,message) {
-      ctx.route=nextRoute;
+    function navigateSearch(query,message) {
+      ctx.route='name-search';
       saveContext(ctx);
       const url=new URL('/browse',location.origin);
       url.searchParams.set('query',query);
@@ -136,30 +141,33 @@
     }
 
     if(route==='browse') {
-      if(ctx.cardName) {
-        navigateSearch(ctx.cardName,'name-search','PSA公式のカード名でALT検索しています…');
-      } else {
-        navigateSearch(ctx.cert,'cert-search','カード名が取得できないため、鑑定番号でALT検索しています…');
+      const query=String(ctx.cardName||ctx.subject||'').trim();
+      if(!query) {
+        report(ctx,false,'PSA公式からカード名を取得できないため、ALT検索を開始できません。');
+        return;
       }
+      navigateSearch(query,'PSA公式のカード名でALT検索しています…鑑定番号では検索しません。');
       return;
     }
 
-    const candidates=await waitForCandidates(10000,ctx);
+    const candidates=await waitForCandidates(15000,ctx);
     if(candidates.length) {
-      const candidate=candidates[0];
+      const bestScore=candidates[0].score;
+      const best=candidates.filter(item=>item.score===bestScore);
+      if(best.length!==1) {
+        report(ctx,false,'カード名検索で候補が複数あります。誤ったカードを選ばないよう保留しました。候補を手動で確認してください。');
+        return;
+      }
+      const candidate=best[0];
       ctx.altTitle=candidate.title||candidate.path;
+      ctx.numberVerified=candidate.numberVerified;
       ctx.route='opening';
       saveContext(ctx);
-      say('ALTの一致カードを開きます: '+ctx.altTitle);
+      say('ALT候補を開き、カード番号とPSAグレードを確認します: '+ctx.altTitle);
       candidate.link.click();
       return;
     }
-
-    if(route==='name-search') {
-      navigateSearch(ctx.cert,'cert-search','カード名検索で候補商品が見つからず、鑑定番号でも確認しています…');
-      return;
-    }
-    report(ctx,false,'カード名検索と鑑定番号検索の両方で、カード番号・言語・PSAグレードが一致するALT商品リンクを取得できませんでした。');
+    report(ctx,false,'カード名検索で一致候補が見つかりませんでした。鑑定番号検索へは切り替えず保留しました。カード名をALTで手動確認してください。');
   }
 
   function currentGradeButton() {
@@ -175,40 +183,35 @@
       .filter(el=>/^(view all|see all|view all transactions|see all transactions)$/i.test(norm(el.innerText||el.getAttribute('aria-label'))));
   }
   function recentTransactionsHeading() {
-    const candidates=[...document.querySelectorAll('h1,h2,h3,h4,[role="heading"],button,[role="button"],a,span,p,div')]
+    return [...document.querySelectorAll('h1,h2,h3,h4,[role="heading"]')]
       .filter(el=>/recent transactions/i.test(norm(el.innerText||el.getAttribute('aria-label'))))
-      .sort((a,b)=>(a.innerText||'').length-(b.innerText||'').length);
-    for(const candidate of candidates) {
-      let node=candidate;
-      for(let i=0;node&&i<10;i++,node=node.parentElement) {
-        if(/recent transactions/i.test(norm(node.innerText||'')) && viewAllControls(node).length) return node;
-      }
-    }
-    return candidates[0]||null;
+      .sort((a,b)=>(a.innerText||'').length-(b.innerText||'').length)[0]||null;
   }
-  async function openTransactions(timeoutMs=10000) {
+  function distanceTo(ancestor, el) {
+    let depth=0;
+    for(let node=el;node;node=node.parentElement,depth++) if(node===ancestor) return depth;
+    return Infinity;
+  }
+  function closestCommonAncestor(a,b,maxDepth=12) {
+    let node=a;
+    for(let i=0;node&&i<maxDepth;i++,node=node.parentElement) if(node.contains(b)) return node;
+    return null;
+  }
+  async function openTransactions(timeoutMs=12000) {
     const deadline=Date.now()+timeoutMs;
     while(Date.now()<deadline) {
-      const direct=viewAllControls(document);
-      for(const control of direct) {
-        let node=control;
-        for(let i=0;node&&i<10;i++,node=node.parentElement) {
-          if(/recent transactions/i.test(norm(node.innerText||''))) {
-            control.click();
-            return true;
-          }
-        }
+      const headings=[...document.querySelectorAll('h1,h2,h3,h4,[role="heading"]')]
+        .filter(el=>/recent transactions/i.test(norm(el.innerText||el.getAttribute('aria-label'))));
+      const controls=viewAllControls(document);
+      let best=null;
+      for(const heading of headings) for(const control of controls) {
+        const common=closestCommonAncestor(heading,control);
+        if(!common || !/recent transactions/i.test(norm(common.innerText||''))) continue;
+        const distance=distanceTo(common,heading)+distanceTo(common,control);
+        if(!best || distance<best.distance) best={control,distance};
       }
-      const heading=recentTransactionsHeading();
-      if(heading) {
-        let node=heading;
-        for(let i=0;node&&i<10;i++,node=node.parentElement) {
-          if(!/recent transactions/i.test(norm(node.innerText||''))) continue;
-          const control=viewAllControls(node)[0];
-          if(control) { control.click(); return true; }
-        }
-      }
-      await sleep(250);
+      if(best) { best.control.click(); return true; }
+      await sleep(300);
     }
     return false;
   }
@@ -296,11 +299,33 @@
     runningFor=key;
     say(`ALTカード: ${ctx.altTitle||'鑑定番号検索結果'}\nPSA ${ctx.grade} の履歴を準備しています…`);
 
-    const selectedTitle=norm(ctx.altTitle||'').replace(/\s+/g,'');
-    const expectedGrade=norm(ctx.grade||'').replace(/\s+/g,'');
-    if(!selectedTitle.includes(expectedGrade)) {
-      report(ctx,false, 'ALT商品名からPSAグレードを確認できません。候補がPSA ' + ctx.grade + 'か確認してください。');
+    const titleText=String(document.querySelector('h1')?.innerText||document.title||ctx.altTitle||'');
+    const subject=String(ctx.subject||ctx.cardName||'').trim();
+    const subjectTerms=norm(subject).replace(/[^\p{L}\p{N}#']+/gu,' ').split(/\s+/).filter(x=>x.length>1&&!/^(pokemon|japanese|english|card|psa|gem|mt|super|rare|ultra|full|art)$/i.test(x));
+    const titleCompact=compact(titleText);
+    if(subjectTerms.length&&!subjectTerms.every(term=>titleCompact.includes(compact(term)))) {
+      report(ctx,false,'開いたALT商品名がPSA公式のカード名と一致しません。');
       return;
+    }
+    const expectedNumber=(ctx.cardName.match(/#\s*0*(\d{1,4})/i)||[])[1]||'';
+    const titleNumbers=[...titleText.matchAll(/#\s*0*(\d{1,4})\b/g)].map(m=>String(Number(m[1])));
+    if(expectedNumber && titleNumbers.length && !titleNumbers.includes(String(Number(expectedNumber)))) {
+      report(ctx,false,'開いたALT商品とPSA公式のカード番号が一致しません。');
+      return;
+    }
+    if(expectedNumber && !titleNumbers.length && !ctx.numberVerified) {
+      report(ctx,false,'ALT商品ページでカード番号を確認できません。誤入力防止のため保留しました。');
+      return;
+    }
+    const gradeButton=await waitFor(currentGradeButton);
+    if(!gradeButton) { report(ctx,false,'ALTのPSAグレード欄を確認できません。'); return; }
+    if(norm(gradeButton.innerText)!==norm(ctx.grade)) {
+      gradeButton.click();
+      const menuItem=await waitFor(()=>[...document.querySelectorAll('[role="menuitem"],button,[role="option"]')].find(el=>norm(el.innerText)===norm(ctx.grade)));
+      if(!menuItem) { report(ctx,false,ctx.grade+'の選択肢がALTにありません。'); return; }
+      menuItem.click();
+      const selected=await waitFor(()=>{ const el=currentGradeButton(); return el&&norm(el.innerText)===norm(ctx.grade)?el:null; });
+      if(!selected) { report(ctx,false,'ALTでPSA '+ctx.grade+'を選択できませんでした。'); return; }
     }
 
     const opened=await waitFor(()=>{
