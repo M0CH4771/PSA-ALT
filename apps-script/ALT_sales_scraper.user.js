@@ -211,7 +211,7 @@
     return false;
   }
   function transactionsRoot() {
-    const titlePattern = /market\\s+transactions|sales\\s+history/i;
+    const titlePattern = /market\s+transactions|sales\s+history/i;
     const isVisible = el => {
       const style=getComputedStyle(el);
       return style.display!=='none' && style.visibility!=='hidden' && el.getClientRects().length>0;
@@ -226,7 +226,7 @@
     }
 
     const headings=[...document.querySelectorAll('h1,h2,h3,h4,[role="heading"]')]
-      .filter(el=>titlePattern.test((el.innerText||'').replace(/\\s+/g,' ').trim()));
+      .filter(el=>titlePattern.test((el.innerText||'').replace(/\s+/g,' ').trim()));
     for(const heading of headings) {
       let node=heading;
       for(let depth=0;node&&depth<14;depth++,node=node.parentElement) {
@@ -238,19 +238,19 @@
   function parseRows(root) {
     const seen=new Set(), out=[];
     const methodRe=/^(auction|buy now|best offer|fixed price|sale)$/i;
-    const dateRe=/^(?:[A-Z][a-z]{2,8}\\s+\\d{1,2},?\\s+\\d{4}|\\d{4}-\\d{2}-\\d{2})$/;
-    const moneyRe=/^\\$\\s?[\\d,]+(?:\\.\\d{1,2})?$/;
+    const dateRe=/^(?:[A-Z][a-z]{2,8}\s+\d{1,2},?\s+\d{4}|\d{4}-\d{2}-\d{2})$/;
+    const moneyRe=/^\$\s?[\d,]+(?:\.\d{1,2})?$/;
     const rowData=el=>{
-      const text=(el.innerText||el.textContent||'').replace(/\\u00a0/g,' ').trim();
-      if(!text||/listing\\s*price|relisted|not\\s*paid|unsold|alt\\s*value/i.test(text)) return null;
-      const lines=text.split(/\\n+/).map(x=>x.trim()).filter(Boolean);
+      const text=(el.innerText||el.textContent||'').replace(/\u00a0/g,' ').trim();
+      if(!text||/listing\s*price|relisted|not\s*paid|unsold|alt\s*value/i.test(text)) return null;
+      const lines=text.split(/\n+/).map(x=>x.trim()).filter(Boolean);
       const method=lines.find(x=>methodRe.test(x));
       // Best Offer is excluded unless ALT exposes a distinct confirmed sale amount.
       if(!method||/^best offer$/i.test(method)) return null;
       const dateText=lines.find(x=>dateRe.test(x));
       const money=lines.find(x=>moneyRe.test(x));
       if(!dateText||!money) return null;
-      const d=new Date(dateText), price=Number(money.replace(/[$,\\s]/g,''));
+      const d=new Date(dateText), price=Number(money.replace(/[$,\s]/g,''));
       if(!Number.isFinite(d.getTime())||!Number.isFinite(price)||price<=0) return null;
       return {date:d,price,method,text};
     };
@@ -264,13 +264,13 @@
       if(!parsed) continue;
       const a=el.matches('a[href]')?el:el.querySelector('a[href]');
       const href=a?.href||'';
-      const ebayId=(href.match(/ebay\\.com\\/itm\\/(\\d{9,15})/i)||[])[1];
+      const ebayId=(href.match(/ebay\.com\/itm\/(\d{9,15})/i)||[])[1];
       const key=ebayId?'ebay:'+ebayId:href?href:parsed.date.toISOString().slice(0,10)+'|'+parsed.price+'|'+parsed.method+'|'+parsed.text;
       if(seen.has(key)) continue;
       seen.add(key);
       const imgAlt=el.querySelector('img[alt]')?.alt?.trim()||'';
-      let site=imgAlt||(/card\\s*hobby/i.test(parsed.text)?'Card Hobby':/ebay/i.test(parsed.text)?'eBay':'ALT');
-      if(!imgAlt&&href) { try { site=new URL(href).hostname.replace(/^www\\./,''); } catch (_) {} }
+      let site=imgAlt||(/card\s*hobby/i.test(parsed.text)?'Card Hobby':/ebay/i.test(parsed.text)?'eBay':'ALT');
+      if(!imgAlt&&href) { try { site=new URL(href).hostname.replace(/^www\./,''); } catch (_) {} }
       out.push({date:parsed.date.toISOString().slice(0,10),price:parsed.price,site,href,method:parsed.method});
     }
     return out.sort((a,b)=>b.date.localeCompare(a.date));
