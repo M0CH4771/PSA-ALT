@@ -244,11 +244,17 @@
       const text=(el.innerText||el.textContent||'').replace(/\u00a0/g,' ').trim();
       if(!text||/listing\s*price|relisted|not\s*paid|unsold|alt\s*value/i.test(text)) return null;
       const lines=text.split(/\n+/).map(x=>x.trim()).filter(Boolean);
-      const method=lines.find(x=>methodRe.test(x));
+      const methodLine=lines.find(x=>methodRe.test(x));
+      const methodMatch=text.match(/\b(auction|buy now|best offer|fixed price|sale)\b/i);
+      const method=methodLine||methodMatch?.[1]||'';
       // Best Offer is excluded unless ALT exposes a distinct confirmed sale amount.
       if(!method||/^best offer$/i.test(method)) return null;
-      const dateText=lines.find(x=>dateRe.test(x));
-      const money=lines.find(x=>moneyRe.test(x));
+      const dateLine=lines.find(x=>dateRe.test(x));
+      const dateMatch=text.match(/\b(?:[A-Z][a-z]{2,8}\s+\d{1,2},?\s+\d{4}|\d{4}-\d{2}-\d{2})\b/);
+      const dateText=dateLine||dateMatch?.[0]||'';
+      const moneyLine=lines.find(x=>moneyRe.test(x));
+      const moneyMatch=text.match(/\$\s?[\d,]+(?:\.\d{1,2})?/);
+      const money=moneyLine||moneyMatch?.[0]||'';
       if(!dateText||!money) return null;
       const d=new Date(dateText), price=Number(money.replace(/[$,\s]/g,''));
       if(!Number.isFinite(d.getTime())||!Number.isFinite(price)||price<=0) return null;
@@ -262,7 +268,7 @@
     for(const el of rows) {
       const parsed=rowData(el);
       if(!parsed) continue;
-      const a=el.matches('a[href]')?el:el.querySelector('a[href]');
+      const a=el.closest('a[href]')||el.matches('a[href]')?el:el.querySelector('a[href]');
       const href=a?.href||'';
       const ebayId=(href.match(/ebay\.com\/itm\/(\d{9,15})/i)||[])[1];
       const key=ebayId?'ebay:'+ebayId:href?href:parsed.date.toISOString().slice(0,10)+'|'+parsed.price+'|'+parsed.method+'|'+parsed.text;
