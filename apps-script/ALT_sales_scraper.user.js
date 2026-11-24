@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PSA-ALT Cert Search and Sales Copier
 // @namespace    M0CH4771.PSA-ALT
-// @version      3.9.4
+// @version      3.9.5
 // @updateURL    https://raw.githubusercontent.com/M0CH4771/PSA-ALT/main/apps-script/ALT_sales_scraper.user.js
 // @downloadURL  https://raw.githubusercontent.com/M0CH4771/PSA-ALT/main/apps-script/ALT_sales_scraper.user.js
 // @description  Searches ALT by PSA card name, confirms exact card number and grade, and copies only verified sales.
@@ -62,8 +62,19 @@
   function compact(value) {
     return norm(value).normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/[^\p{L}\p{N}#]+/gu,'');
   }
+  function coreSubject(label) {
+    const text=String(label||'').trim();
+    const number=text.match(/#\s*0*\d{1,4}\b/);
+    if(!number) return '';
+    const prefix=text.slice(0,number.index);
+    let tail=text.slice(number.index+number[0].length).trim()
+      .replace(/^(?:FA|FULL\s*ART|ALT\s*ART|SPECIAL\s*ART)\s*\/\s*/i,'')
+      .replace(/\s+(?:SPECIAL\s+ART\s+RARE|ILLUSTRATION\s+RARE|SUPER\s+RARE|ULTRA\s+RARE|HYPER\s+RARE|SECRET\s+RARE|DOUBLE\s+RARE|COMMON|UNCOMMON|RARE|PROMO).*$/i,'');
+    const stop=new Set((prefix.toLowerCase().match(/[\p{L}\p{N}]+/gu)||[]));
+    return tail.split(/\s+/).filter(word=>!stop.has(word.toLowerCase().replace(/[^\p{L}\p{N}]+/gu,''))).join(' ').trim();
+  }
   function candidateItems(ctx) {
-    const subject=String(ctx.subject||ctx.cardName||'').trim();
+    const subject=coreSubject(ctx.cardName||ctx.subject)||String(ctx.subject||ctx.cardName||'').trim();
     const subjectTerms=norm(subject).replace(/[^\p{L}\p{N}#']+/gu,' ').split(/\s+/).filter(x=>x.length>1&&!/^(pokemon|japanese|english|card|psa|gem|mt|super|rare|ultra|full|art)$/i.test(x));
     const number=(ctx.cardName.match(/#\s*0*(\d{1,4})/i)||[])[1]||'';
     const language=(ctx.cardName.match(/\b(japanese|korean|english|chinese|mandarin|cantonese|thai|indonesian|german|french|italian|spanish)\b/i)||[])[1]||'';
@@ -300,7 +311,7 @@
     say(`ALTカード: ${ctx.altTitle||'鑑定番号検索結果'}\nPSA ${ctx.grade} の履歴を準備しています…`);
 
     const titleText=String(document.querySelector('h1')?.innerText||document.title||ctx.altTitle||'');
-    const subject=String(ctx.subject||ctx.cardName||'').trim();
+    const subject=coreSubject(ctx.cardName||ctx.subject)||String(ctx.subject||ctx.cardName||'').trim();
     const subjectTerms=norm(subject).replace(/[^\p{L}\p{N}#']+/gu,' ').split(/\s+/).filter(x=>x.length>1&&!/^(pokemon|japanese|english|card|psa|gem|mt|super|rare|ultra|full|art)$/i.test(x));
     const titleCompact=compact(titleText);
     if(subjectTerms.length&&!subjectTerms.every(term=>titleCompact.includes(compact(term)))) {
