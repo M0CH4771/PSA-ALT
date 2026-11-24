@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PSA Cert Reader for PSA-ALT
 // @namespace    M0CH4771.PSA-ALT
-// @version      1.1.0
+// @version      1.2.0
 // @updateURL    https://raw.githubusercontent.com/M0CH4771/PSA-ALT/main/apps-script/PSA_cert_scraper.user.js
 // @downloadURL  https://raw.githubusercontent.com/M0CH4771/PSA-ALT/main/apps-script/PSA_cert_scraper.user.js
 // @description  Reads the visible PSA certification page and returns its cert, subject, grade, and official image to the batch app.
@@ -38,35 +38,42 @@
     if (pathCert !== cert) return null;
     const body = clean(document.body?.innerText || '').replace(/\n{2,}/g,'\n');
     if (!body.includes(cert)) return null;
+
     const gradeMatch = body.match(/Item\s*Grade\s*(?:\/\s*)?(GEM\s*MT|MINT|NM-MT|EX-MT|EX|VG-EX|VG|GOOD|FAIR|POOR)\s*(\d+(?:\.5)?)/i);
-    const subjectMatch = body.match(/(?:^|\n)Subject\s*\n\s*([^\n]+)/i) || body.match(/Subject\s+([^\n]+)/i);
-    let name = subjectMatch ? clean(subjectMatch[1]) : '';
-    if (!name) {
-      const h = clean(document.querySelector('h1')?.innerText || '');
-      if (h && !/cert verification/i.test(h) && !new RegExp(`^#?${cert}$`).test(h)) name=h.replace(/^#\s*/,'');
-    }
-    if (!gradeMatch || !name || /no data found|not found|invalid cert/i.test(body)) return null;
+    const titles = [...document.querySelectorAll('h1,h2,h3,h4,[role="heading"]')]
+      .map(el => clean(el.innerText || ''))
+      .filter(text => text && !/search|pedigree|cert verification/i.test(text) &&
+        /\b(?:19|20)\d{2}\b/.test(text) && /#\s*0*\d{1,4}\b/.test(text));
+    const title = titles.sort((a,b)=>b.length-a.length)[0] || '';
+    if (!gradeMatch || !title || /no data found|not found|invalid cert/i.test(body)) return null;
+
+    const numberMatch=title.match(/#\s*0*(\d{1,4})\b/);
+    const tailMatch=numberMatch ? title.slice(numberMatch.index+numberMatch[0].length).trim() : '';
+    let subject=tailMatch
+      .replace(/^(?:FA|FULL\s*ART|ALT\s*ART|SPECIAL\s*ART)\s*\/\s*/i,'')
+      .replace(/\s+(?:SPECIAL\s+ART\s+RARE|ILLUSTRATION\s+RARE|SUPER\s+RARE|ULTRA\s+RARE|HYPER\s+RARE|SECRET\s+RARE|DOUBLE\s+RARE|COMMON|UNCOMMON|RARE|PROMO).*$/i,'')
+      .trim();
+    const prefix=numberMatch ? title.slice(0,numberMatch.index) : '';
+    const prefixWords=new Set((prefix.toLowerCase().match(/[\p{L}\p{N}]+/gu)||[]));
+    subject=subject.split(/\s+/).filter(word=>!prefixWords.has(word.toLowerCase().replace(/[^\p{L}\p{N}]+/gu,''))).join(' ').trim();
+    if (!subject) subject=tailMatch || title;
+
     const img = [...document.querySelectorAll('img[alt]')].find(el=>/^Cert image\s*1$/i.test(clean(el.alt)));
     let imageUrl = '';
     try {
       const candidate = new URL(img?.currentSrc || img?.src || '', location.href);
       if (candidate.protocol==='https:' && /(^|\.)psacard\.com$/i.test(candidate.hostname)) imageUrl=candidate.href;
     } catch (_) {}
-    const cardNumberMatch = body.match(/(?:Card\s*(?:No\.?|Number)|Number)\s*\n?\s*#?([^\n]+)/i);
-    const yearMatch = body.match(/(?:Year)\s*\n?\s*([^\n]+)/i);
-    const brandMatch = body.match(/(?:Brand|Set)\s*\n?\s*([^\n]+)/i);
-    const varietyMatch = body.match(/(?:Variety|Pedigree)\s*\n?\s*([^\n]+)/i);
-    const searchName = [yearMatch?.[1], brandMatch?.[1], name, cardNumberMatch?.[1] ? '#' + clean(cardNumberMatch[1]).replace(/^#/, '') : '', varietyMatch?.[1]]
-      .map(clean).filter(Boolean).join(' ').replace(/\s+/g,' ').trim();
+
     return {
-      name,
-      fullName: searchName || name,
-      grade:`PSA ${Number(gradeMatch[2])}`,
+      name:title,
+      fullName:title,
+      subject,
+      grade:'PSA '+Number(gradeMatch[2]),
       imageUrl,
-      url:`https://www.psacard.com/cert/${cert}/psa`
+      url:'https://www.psacard.com/cert/'+cert+'/psa'
     };
   }
-
   let attempts = 0;
   const timer = setInterval(() => {
     attempts++;
