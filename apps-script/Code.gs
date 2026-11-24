@@ -70,6 +70,11 @@ function ensureSummarySheet(dateInput) {
     setSummaryHeaders_(sheet);
   }
 
+  var imageUrlHeader = sheet.getRange(1, PSA_ALT_COLUMNS.imageUrl);
+  if (!String(imageUrlHeader.getDisplayValue() || '').trim()) {
+    imageUrlHeader.setValue('PSA画像URL');
+  }
+
   return { sheet: sheetName };
 }
 
