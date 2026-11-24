@@ -277,34 +277,19 @@ function adoptedPrice_(previous, latest) {
 }
 
 function isPsaCertUrl_(value, cert) {
-  try {
-    var url = new URL(value);
-    return url.protocol === 'https:' &&
-      url.hostname === 'www.psacard.com' &&
-      url.pathname.toLowerCase() === '/cert/' + cert + '/psa';
-  } catch (e) {
-    return false;
-  }
+  // Apps Script V8 does not provide the browser URL constructor.
+  var match = /^https:\/\/www\.psacard\.com\/cert\/(\d{6,12})\/psa\/?(?:[?#].*)?$/i.exec(String(value || '').trim());
+  return !!match && match[1] === String(cert);
 }
 
 function isPsaImageUrl_(value) {
-  try {
-    var url = new URL(value);
-    return url.protocol === 'https:' && /(^|\.)psacard\.com$/i.test(url.hostname);
-  } catch (e) {
-    return false;
-  }
+  // Allow only HTTPS URLs whose host is psacard.com or one of its subdomains.
+  return /^https:\/\/(?:[a-z0-9-]+\.)*psacard\.com(?:[/:?#]|$)/i.test(String(value || '').trim());
 }
 
 function isAltResearchUrl_(value) {
-  try {
-    var url = new URL(value);
-    return url.protocol === 'https:' &&
-      url.hostname === 'alt.xyz' &&
-      /^\/itm\/[0-9a-f-]+\/research\/?$/i.test(url.pathname);
-  } catch (e) {
-    return false;
-  }
+  // Current ALT product pages may use either the research or external route.
+  return /^https:\/\/alt\.xyz\/itm\/[0-9a-f-]+\/(?:research|external)\/?(?:[?#].*)?$/i.test(String(value || '').trim());
 }
 
 function saleNote_(label, sale, grade) {
