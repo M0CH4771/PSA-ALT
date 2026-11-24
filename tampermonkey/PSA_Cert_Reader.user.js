@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PSA Cert Reader for PSA-ALT
 // @namespace    M0CH4771.PSA-ALT
-// @version      1.1.0
+// @version      1.2.0
 // @description  Reads PSA certification pages and relays results to the PSA-ALT batch app, including when PSA severs window.opener.
 // @match        https://www.psacard.com/cert/*
 // @match        https://script.google.com/macros/s/*/exec*
