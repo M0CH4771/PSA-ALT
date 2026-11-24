@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PSA Cert Reader for PSA-ALT
 // @namespace    M0CH4771.PSA-ALT
-// @version      1.1.0
+// @version      1.2.0
 // @description  Reads PSA certification pages and relays results to the PSA-ALT batch app, including when PSA severs window.opener.
 // @match        https://www.psacard.com/cert/*
 // @match        https://script.google.com/macros/s/*/exec*
@@ -26,10 +26,14 @@
   if (location.hostname !== 'www.psacard.com' || window.__psaAltCertReader) return;
   window.__psaAltCertReader = true;
 
-  const params = new URLSearchParams(location.search);
-  const cert = String(params.get('psaCert') || '').replace(/\D/g, '');
-  const nonce = String(params.get('psaNonce') || '');
-  if (params.get('psaBatch') !== '1' || !/^\d{6,12}$/.test(cert) || !/^[\w-]{10,100}$/.test(nonce)) return;
+  // Prefer the fragment so custom batch parameters are never sent to PSA's server.
+  // The query fallback keeps older deployed app URLs working during the transition.
+  const searchParams = new URLSearchParams(location.search);
+  const hashParams = new URLSearchParams(location.hash.replace(/^#/, ''));
+  const cert = String(hashParams.get('psaCert') || searchParams.get('psaCert') || '').replace(/\D/g, '');
+  const nonce = String(hashParams.get('psaNonce') || searchParams.get('psaNonce') || '');
+  const batch = hashParams.get('psaBatch') || searchParams.get('psaBatch');
+  if (batch !== '1' || !/^\d{6,12}$/.test(cert) || !/^[\w-]{10,100}$/.test(nonce)) return;
 
   const box = document.createElement('div');
   Object.assign(box.style, {position:'fixed',right:'18px',bottom:'18px',zIndex:'2147483647',maxWidth:'420px',padding:'12px 16px',borderRadius:'8px',background:'#13233a',color:'#fff',font:'14px/1.5 system-ui',boxShadow:'0 3px 12px #0005'});

@@ -43,8 +43,10 @@ function initializeBoundSpreadsheet() {
 function lookupPsaCert(certInput) {
   var cert = normalizeCert_(certInput);
   var nonce = Utilities.getUuid().replace(/-/g, '');
+  // Keep app state in the URL fragment. PSA receives the clean canonical cert path,
+  // while the userscript can still read the batch metadata from location.hash.
   var url = 'https://www.psacard.com/cert/' + encodeURIComponent(cert) +
-    '/psa?psaBatch=1&psaCert=' + encodeURIComponent(cert) +
+    '/psa#psaBatch=1&psaCert=' + encodeURIComponent(cert) +
     '&psaNonce=' + encodeURIComponent(nonce);
   return { cert: cert, nonce: nonce, psaUrl: url };
 }
