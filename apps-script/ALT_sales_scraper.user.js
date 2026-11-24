@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PSA-ALT Cert Search and Sales Copier
 // @namespace    M0CH4771.PSA-ALT
-// @version      3.12.0
+// @version      3.13.0
 // @updateURL    https://raw.githubusercontent.com/M0CH4771/PSA-ALT/main/apps-script/ALT_sales_scraper.user.js
 // @downloadURL  https://raw.githubusercontent.com/M0CH4771/PSA-ALT/main/apps-script/ALT_sales_scraper.user.js
 // @description  Searches ALT by PSA card name, confirms exact card number and grade, and copies only verified sales.
@@ -132,12 +132,14 @@
     const results=new Map();
     for(const item of items) {
       const label=String(item.link.innerText||'').replace(/\s+/g,' ').trim();
-      if(item.path && (!gradeRe.test(label)||!identityMatches(label,ctx))) continue;
-      if(!item.path && !item.link.matches('button,[role="button"],[role="option"],[role="row"],tr,[tabindex]')) continue;
+      // A card image might carry the title/grade only in alt text. In all cases re-check on detail.
+      const evidence=identityMatches(label,ctx)?label:item.title;
+      if(item.path && (!identityMatches(evidence,ctx)||(/\b(?:PSA|CGC|BGS|SGC|TAG)\s+\d+(?:\.\d+)?\b/i.test(evidence)&&!gradeRe.test(evidence)))) continue;
+      if(!item.path && !item.link.matches('button,[role="button"],[role="option"],[role="row"],tr,[tabindex]') && getComputedStyle(item.link).cursor!=='pointer') continue;
       const key=item.path||'text:'+compact(label.replace(/#\s*0+(?=\d)/g,'#'));
       if(!results.has(key)) results.set(key,{...item,key});
     }
-    return [...results.values()].sort((a,b)=>Number(!!b.path)-Number(!!a.path));
+    return [...results.values()].sort((a,b)=>Number(gradeRe.test(b.title))-Number(gradeRe.test(a.title))||Number(!!b.path)-Number(!!a.path));
   }
 
   function candidateKey(item) {
@@ -206,7 +208,7 @@
   async function openSingleCertCandidate() {
     const ctx=readContext();
     if(!ctx||!/^\/browse\/?$/.test(location.pathname)||!['browse','name-search'].includes(ctx.route)) return;
-    const runKey='browse:'+ctx.nonce+':'+ctx.route;
+    const runKey='browse:'+ctx.nonce+':'+ctx.route+':'+(ctx.queryIndex||0);
     if(runningFor===runKey) return;
     runningFor=runKey;
     const full=identityTitle(ctx).trim();
@@ -215,11 +217,21 @@
     const year=(full.match(/\b(?:19|20)\d{2}\b/)||[])[0];
     if(!subject||!number||!year) { report(ctx,false,'PSAカード名・年・型番を取得できません。'); return; }
     // Full PSA labels contain PSA-only codes and repeated variety names.
-    const query=/25TH ANNIVERSARY GOLDEN BOX/i.test(full) ? subject+' Golden Box' : subject+' '+number.padStart(3,'0');
+    const setName=full.split(/#\s*\d/)[0].replace(/^\s*(?:19|20)\d{2}\s*/,'').replace(/\b(?:pokemon|japanese|korean|english|chinese|tcg|sword|shield|scarlet|violet|and|sv\d+[a-z]?|s\d+[a-z]?)\b/ig,' ').replace(/[^\p{L}\p{N}\s]+/gu,' ').replace(/\s+/g,' ').trim();
+    const queries=[/25TH ANNIVERSARY GOLDEN BOX/i.test(full) ? subject+' Golden Box' : subject+' '+number.padStart(3,'0'),subject+' '+number,subject+' '+setName,subject].filter(x=>x.trim());
+    ctx.queries=[...new Set(queries.map(x=>x.trim()))];
+    const query=ctx.queries[ctx.queryIndex||0]||ctx.queries[0];
+    function nextQuery(reason) {
+      const next=(ctx.queryIndex||0)+1;
+      if(next>=ctx.queries.length||Date.now()-ctx.createdAt>43000) { report(ctx,false,reason+' (検索語: '+query+')'); return; }
+      ctx.queryIndex=next; ctx.query=ctx.queries[next]; ctx.route='name-search'; saveContext(ctx);
+      say('ALT検索語を変更: '+ctx.query);
+      const url=new URL('/browse',location.origin); url.searchParams.set('query',ctx.query); location.assign(url.href);
+    }
     const input=await waitFor(browseSearchInput,15000);
     if(!input) { report(ctx,false,'ALTの「Search by name or cert #」入力欄が見つかりません。'); return; }
     if(ctx.route==='browse') {
-      ctx.route='name-search'; ctx.query=query; saveContext(ctx); runningFor='browse:'+ctx.nonce+':name-search';
+      ctx.route='name-search'; ctx.query=query; saveContext(ctx); runningFor='browse:'+ctx.nonce+':name-search:'+(ctx.queryIndex||0);
       say('ALT検索欄に入力: '+query);
       // Navigate via the same query parameter ALT's visible search uses.
       // Avoid relying on synthetic Enter during React's initial rerender.
@@ -240,11 +252,11 @@
         if(current) applied=await submitSearch(current,query);
         if(!applied) await sleep(500);
       }
-      if(!field || !applied) { report(ctx,false,'ALTの検索欄と検索URLがカード名に一致しません: '+query); return; }
-      if(!await waitFor(()=>norm(browseSearchInput()?.value)===norm(query)&&norm(new URLSearchParams(location.search).get('query'))===norm(query),12000)) { report(ctx,false,'ALT検索の反映を確認できません: '+query); return; }
+      if(!field || !applied) { nextQuery('ALTの検索欄にカード名が反映されませんでした。'); return; }
+      if(!await waitFor(()=>norm(browseSearchInput()?.value)===norm(query)&&norm(new URLSearchParams(location.search).get('query'))===norm(query),5000)) { nextQuery('ALT検索の反映を確認できません。'); return; }
     }
     say('ALT検索確認済み: '+query);
-    const deadline=Date.now()+25000;
+    const deadline=Date.now()+((ctx.queryIndex||0)===0?9000:6500);
     let candidates=[], signature='', stable=0;
     while(Date.now()<deadline) {
       const current=candidateItems(ctx).filter(item=>!(ctx.attempted||[]).includes(candidateKey(item)));
@@ -255,7 +267,7 @@
       await sleep(400);
     }
     if(!candidates.length) {
-      report(ctx,false,ctx.lastFailure||'検索は実行済みですが、カード条件が一致する画像付き商品・文字候補を取得できません。'); return;
+      nextQuery(ctx.lastFailure||'検索は実行済みですが、カード条件が一致する画像付き商品・文字候補を取得できません。'); return;
     }
     ctx.candidates=candidates.map(({key,path,title})=>({key,path,title}));
     openCandidate(ctx,candidates[0]);
@@ -293,7 +305,7 @@
     while(Date.now()<deadline) {
       const headings=[...document.querySelectorAll('h1,h2,h3,h4,[role="heading"]')]
         .filter(el=>/recent transactions/i.test(norm(el.innerText||el.getAttribute('aria-label'))));
-      const controls=viewAllControls(document);
+      const controls=viewAllControls(document).filter(visible);
       let best=null;
       for(const heading of headings) for(const control of controls) {
         const common=closestCommonAncestor(heading,control);
@@ -301,35 +313,33 @@
         const distance=distanceTo(common,heading)+distanceTo(common,control);
         if(!best || distance<best.distance) best={control,distance};
       }
+      if(marketTitleVisible()) return true;
       if(best) { best.control.click(); return true; }
       await sleep(300);
     }
     return false;
   }
   function transactionsRoot() {
-    const titlePattern = /market\s+transactions/i;
-    const isVisible = el => {
-      const style=getComputedStyle(el);
-      return style.display!=='none' && style.visibility!=='hidden' && el.getClientRects().length>0;
-    };
-
-    // ALT opens Sales History as a drawer. Do not require transaction links:
-    // on some item pages, transaction rows are clickable divs rather than anchors.
-    const overlays=[...document.querySelectorAll('[role="dialog"],[aria-modal="true"],.MuiDrawer-paper,.MuiDrawer-root,aside')]
-      .filter(isVisible);
-    for(const overlay of overlays) {
-      if(titlePattern.test(overlay.innerText||'')) return overlay;
-    }
-
-    const headings=[...document.querySelectorAll('h1,h2,h3,h4,[role="heading"]')]
-      .filter(el=>titlePattern.test((el.innerText||'').replace(/\s+/g,' ').trim()));
-    for(const heading of headings) {
-      let node=heading;
+    // ALT may render the drawer title as plain text rather than a heading.
+    const isTitle=el=>visible(el)&&/^market\s+transactions$/i.test(norm(el.innerText||el.textContent||el.getAttribute('aria-label')));
+    const titles=[...document.querySelectorAll('h1,h2,h3,h4,[role="heading"],span,p,div')].filter(isTitle);
+    const leaves=titles.filter(el=>!titles.some(other=>other!==el&&el.contains(other)));
+    const overlays=[...document.querySelectorAll('[role="dialog"],[aria-modal="true"],.MuiDrawer-paper,.MuiDrawer-root,aside')].filter(visible);
+    for(const heading of leaves) {
+      const candidates=overlays.filter(el=>el.contains(heading)&&!/^\s*listings\s*$/im.test(el.innerText||''));
+      if(candidates.length) return candidates.sort((a,b)=>distanceTo(a,heading)-distanceTo(b,heading))[0];
+      let node=heading.parentElement;
       for(let depth=0;node&&depth<14;depth++,node=node.parentElement) {
-        if(titlePattern.test(node.innerText||'') && isVisible(node) && /\$\s?[\d,]+/.test(node.innerText||'') && node.querySelector('a[href]')) return node;
+        if(node===document.body||node===document.documentElement||node.matches('main')) break;
+        if(!visible(node)||/^\s*listings\s*$/im.test(node.innerText||'')) continue;
+        // Don't require anchors: some versions use clickable divs for rows.
+        if(parseRows(node).length) return node;
       }
     }
     return null;
+  }
+  function marketTitleVisible() {
+    return [...document.querySelectorAll('h1,h2,h3,h4,[role="heading"],span,p,div')].some(el=>visible(el)&&/^market\s+transactions$/i.test(norm(el.innerText||el.textContent||el.getAttribute('aria-label'))));
   }
   function parseRows(root) {
     const seen=new Set(), out=[];
@@ -433,18 +443,25 @@
     }
 
     const opened=await waitFor(()=>{
-      if(transactionsRoot()) return 'already-open';
+      if(marketTitleVisible()) return 'already-open';
       return recentTransactionsHeading()?'ready':null;
     },25000);
     if(!opened) { retryCandidate(ctx,'ALTの成約履歴欄が見つかりません。'); return; }
     if(opened!=='already-open' && !(await openTransactions())) { retryCandidate(ctx,'ALTの「Recent Transactions → VIEW ALL」を見つけられませんでした。'); return; }
-    const root=await waitFor(transactionsRoot,30000);
-    if(!root) { retryCandidate(ctx,'Market transactionsを開けませんでした。'); return; }
-    let rows=await waitFor(()=>{ const parsed=parseRows(root); return parsed.length?parsed:null; },8000)||[];
+    let root=await waitFor(transactionsRoot,15000);
+    if(!root) { retryCandidate(ctx,marketTitleVisible()?'Market transactionsは表示済みですが、成約行の読み込みを確認できませんでした。':'Market transactionsを開けませんでした。'); return; }
+    let rows=[];
+    // React can replace the drawer while transactions load. Resolve it again
+    // on every poll, and wait for two records rather than the first row.
+    await waitFor(()=>{
+      const fresh=transactionsRoot();
+      if(fresh) { root=fresh; rows=parseRows(root); }
+      return rows.length>=2?rows:null;
+    },12000);
     for(let i=0;rows.length<2&&i<5;i++) {
       const more=[...root.querySelectorAll('button')].find(x=>(x.innerText||'').trim().toLowerCase()==='show more'&&!x.disabled);
       if(!more) break;
-      more.click(); await sleep(700); rows=parseRows(root);
+      more.click(); await sleep(700); root=transactionsRoot()||root; rows=parseRows(root);
     }
     if(rows.length<2) { retryCandidate(ctx,`同一条件の有効成約が${rows.length}件です。2件そろわないため価格を記入しません。`); return; }
     if(displayedGrade()!==norm(ctx.grade)) { retryCandidate(ctx,'成約取得後のPSAグレードが一致しません。'); return; }
