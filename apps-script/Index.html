@@ -81,8 +81,12 @@
     status.className = type || 'small';
   }
 
+  function halfWidth(value) {
+    return String(value || '').normalize('NFKC');
+  }
+
   function digits(value) {
-    return String(value || '').replace(/\D/g, '');
+    return halfWidth(value).replace(/\D/g, '');
   }
 
   function renderQueue() {
@@ -127,6 +131,7 @@
     if (busy) return;
     clearTimeout(autoAddTimer);
     var input = $('cert');
+    input.value = halfWidth(input.value);
     var cert = digits(input.value);
     if (!/^\d{6,12}$/.test(cert)) {
       if (cert.length) setStatus('鑑定番号は6〜12桁で読み取ってください。', 'error');
@@ -147,6 +152,16 @@
 
   function onScannerInput() {
     if (busy) return;
+    var input = $('cert');
+    var normalized = halfWidth(input.value);
+    if (normalized !== input.value) {
+      var caret = input.selectionStart;
+      input.value = normalized;
+      if (typeof caret === 'number') {
+        var nextCaret = Math.min(caret, normalized.length);
+        input.setSelectionRange(nextCaret, nextCaret);
+      }
+    }
     clearTimeout(autoAddTimer);
     autoAddTimer = setTimeout(function() {
       var cert = digits($('cert').value);
