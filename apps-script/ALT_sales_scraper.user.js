@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PSA-ALT Cert Search and Sales Copier
 // @namespace    M0CH4771.PSA-ALT
-// @version      3.3.0
+// @version      3.4.0
 // @description  Searches ALT by PSA cert, selects the exact grade, and returns confirmed sales to the batch app.
 // @match        https://alt.xyz/browse*
 // @match        https://alt.xyz/itm/*/research*
@@ -107,15 +107,18 @@
     runningFor='browse:'+ctx.cert;
 
     const searchInput=await waitFor(browseSearchInput,10000);
-    if(!searchInput) { report(ctx,false,'ALTの検索欄が見つからず、鑑定番号を検索できませんでした。'); return; }
-    await submitCertSearch(searchInput,ctx.cert);
-    say('鑑定番号 '+ctx.cert+' でALT検索を実行しました。検索結果を確認しています…');
+    if(!searchInput) { report(ctx,false,'ALTの検索欄が見つからず、カードを検索できませんでした。'); return; }
 
-    let candidates=await waitForCandidates(8000);
-    if(!candidates.length && ctx.cardName && norm(ctx.cardName)!==norm(ctx.cert)) {
-      say('鑑定番号で見つからないため、PSA公式のカード名でALTを再検索しています…');
+    let candidates=[];
+    if(ctx.cardName) {
       await submitCertSearch(searchInput,ctx.cardName);
-      candidates=await waitForCandidates(12000);
+      say('PSA公式のカード名「'+ctx.cardName+'」でALT検索しています…');
+      candidates=await waitForCandidates(10000);
+    }
+    if(!candidates.length) {
+      await submitCertSearch(searchInput,ctx.cert);
+      say((ctx.cardName?'カード名で候補が見つからないため、':'')+'鑑定番号 '+ctx.cert+' でALTを再検索しています…');
+      candidates=await waitForCandidates(10000);
     }
 
     if(candidates.length===1) {
@@ -129,7 +132,7 @@
       report(ctx,false,'ALT候補が'+candidates.length+'件あります。誤選択を防ぐため保留しました。');
       return;
     }
-    report(ctx,false,'鑑定番号検索とカード名検索の両方でALT候補を取得できませんでした。');
+    report(ctx,false,'カード名と鑑定番号の両方でALT候補を取得できませんでした。');
   }
 
   function currentGradeButton() {
