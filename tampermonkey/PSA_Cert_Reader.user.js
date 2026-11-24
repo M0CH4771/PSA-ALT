@@ -61,6 +61,7 @@
     const body = clean(document.body?.innerText || '').replace(/\n{2,}/g,'\n');
     if (!body.includes(cert)) return null;
     const gradeMatch = body.match(/Item\s+Grade\s+(GEM\s*MT|MINT|NM-MT|EX-MT|EX|VG-EX|VG|GOOD|FAIR|POOR)\s*(\d+(?:\.5)?)/i);
+    const fullName = clean(document.querySelector('h1')?.innerText || '');
     const subjectMatch = body.match(/(?:^|\n)Subject\s*\n\s*([^\n]+)/i) || body.match(/Subject\s+([^\n]+)/i);
     let name = subjectMatch ? clean(subjectMatch[1]) : '';
     if (!name) {
@@ -74,7 +75,7 @@
       const candidate = new URL(img?.currentSrc || img?.src || '', location.href);
       if (candidate.protocol==='https:' && /(^|\.)psacard\.com$/i.test(candidate.hostname)) imageUrl=candidate.href;
     } catch (_) {}
-    return {name, grade:`PSA ${Number(gradeMatch[2])}`, imageUrl, url:`https://www.psacard.com/cert/${cert}/psa`};
+    return {name, fullName:fullName||name, grade:`PSA ${Number(gradeMatch[2])}`, imageUrl, url:`https://www.psacard.com/cert/${cert}/psa`};
   }
 
   let attempts = 0;
